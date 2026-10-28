@@ -88,6 +88,14 @@ md("""
 
 Installs, repo, Drive. `datasets>=4.8` is enough: this corpus's `Json` feature
 type streams fine on 4.8.5, tested directly.
+
+`pip` will warn that `gradio`, `gradio-client` and `diffusers` want
+`huggingface-hub>=1.16` while this cell resolves `0.36.x`. **Expected and
+harmless here:** `transformers 4.x` requires `huggingface-hub<1.0`, so pip pins
+the hub down, and the three complaining packages are preinstalled in the Colab
+image, while nothing in this notebook imports them. We hold `transformers<5` on
+purpose, since 4-bit loading through `peft` and `bitsandbytes` is tested against
+the 4.x API.
 """)
 
 code("""
@@ -104,9 +112,13 @@ CKPT_DIR = "/content/drive/MyDrive/odydora_ckpt"
 os.makedirs(CKPT_DIR, exist_ok=True)
 
 p = torch.cuda.get_device_properties(0)
+# is_bf16_supported() defaults to including_emulation=True, which returns True
+# even on a T4 by falling back to a software-emulated bfloat16 tensor. Compute
+# capability >= 8.0 (Ampere) is the test for real bf16 tensor cores.
+bf16_cores = p.major >= 8
 print(f"GPU            {p.name}  {p.total_memory/2**30:.1f} GiB  sm_{p.major}{p.minor}")
-print(f"bf16 usable    {torch.cuda.is_bf16_supported()}   (False on a T4: Turing has no bf16 tensor cores)")
-print(f"fp16 it is.    checkpoints -> {CKPT_DIR}")
+print(f"bf16 cores     {bf16_cores}   ({'Ampere or newer' if bf16_cores else 'Turing: emulation only, so fp16'})")
+print(f"training in    fp16   checkpoints -> {CKPT_DIR}")
 """)
 
 md("""

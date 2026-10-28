@@ -1,7 +1,16 @@
 """The shared recurrent core: one N x N mixer called at every layer boundary.
 
-Two design facts here were measured rather than assumed, and both were
-surprises; `Research/SUMMARY.md` carries the tables.
+The architecture is borrowed from OdyssNet (Cahit Karahan, v4.0.0, MIT,
+https://github.com/theomgdev/OdyssNet), which shows that temporal depth can
+replace spatial depth: one fully connected N x N matrix with a hard-zero
+diagonal, echoed over many timesteps under per-step RMSNorm, solves non-linear
+problems with zero hidden layers. Three of its mechanisms are reused verbatim
+here -- the shared zero-diagonal matrix, the per-step state normalisation, and
+the state detached at the call boundary so information crosses forward while
+gradient does not. Reference only: this package does not import or vendor it.
+
+What differs is below, and both parts came from measurement rather than from
+the design they started in; `Research/SUMMARY.md` carries the tables.
 
 Per-step RMSNorm pins the state to the sqrt(N) sphere exactly, which makes
 explosion structurally impossible whatever W's spectral radius is -- but it
@@ -10,7 +19,8 @@ also renormalises the past away, so a pure norm recurrence forgets
 measures 0.0e+00 at every width and seed tried. A contractive decay, the
 usual prescription for a recurrence, makes that worse rather than better.
 Mixing the new state into the old convexly is what keeps memory alive, and
-it bounds the norm at the same time.
+it bounds the norm at the same time. OdyssNet does not need this because its
+own tasks never carry a state that far.
 """
 
 import torch

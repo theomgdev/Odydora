@@ -4,6 +4,19 @@ Instructions for any assistant working in this repository. Read it before you
 touch anything. `CONTRIBUTING.md` carries the full detail; this is the short
 form plus the things an agent specifically gets wrong here.
 
+## Where this architecture comes from
+
+The core is borrowed from [OdyssNet](https://github.com/theomgdev/OdyssNet)
+(Cahit Karahan, v4.0.0, MIT): one shared `N x N` matrix with a hard-zero
+diagonal, per-step RMSNorm on the state, and the state detached at the call
+boundary. Reference only -- never import or vendor it, since Colab cannot see
+that repository. Its measurements are its own and are not evidence about this
+project. Credit it in anything published from here, and keep `CITATION.cff`'s
+`references` entry intact.
+
+OdyssNet also lives locally at `~/Desktop/PROJELER/Python/AI/OdyssNet` with its
+own `AGENTS.md`; read that before editing anything inside it.
+
 ## Rule one: every number here was measured
 
 The throughput table, the memory figures, the influence-decay numbers — each

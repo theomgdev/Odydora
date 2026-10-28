@@ -1,11 +1,36 @@
 cff-version: 1.2.0
-message: If you use this software, please cite it as below.
+message: "If you use Odydora in your research, please cite it as below — and cite OdyssNet, whose architecture this builds on (listed under `references`)."
 title: "Odydora: a shared cross-layer recurrent core as a parameter-efficient adapter"
+abstract: "Odydora inserts a single N x N recurrent matrix, shared by every decoder layer of a frozen 4-bit language model, carrying state across layers and across chunk boundaries so that documents far longer than the context window train in fixed-size pieces. The core mechanism — one shared matrix with a hard-zero diagonal under per-step RMSNorm, with the state detached at call boundaries — is taken from OdyssNet; Odydora adapts it to steer a frozen pretrained host at segment rate, adding a convex state mix because per-step normalisation alone forgets completely over thousands of steps."
 authors:
   - family-names: Karahan
     given-names: Cahit
-    orcid: ""
+    email: "cksoftwaresystems@gmail.com"
+url: "https://github.com/theomgdev/Odydora"
 repository-code: "https://github.com/theomgdev/Odydora"
 license: MIT
 version: 0.1.0
 date-released: "2026-10-29"
+keywords:
+  - "parameter-efficient fine-tuning"
+  - "lora"
+  - "dora"
+  - "qlora"
+  - "recurrent neural networks"
+  - "long context"
+  - "cross-layer parameter sharing"
+  - "pytorch"
+references:
+  - type: software
+    title: "OdyssNet: The Trainable Dynamic System & Zero-Hidden Architecture"
+    abstract: "OdyssNet is a chaotic, fully connected neural network architecture that proves temporal depth (thinking steps) can replace spatial depth (hidden layers). It solves non-linear problems like MNIST with Zero Hidden Layers by utilizing Trainable Chaos."
+    authors:
+      - family-names: Karahan
+        given-names: Cahit
+        email: "cksoftwaresystems@gmail.com"
+    version: 4.0.0
+    date-released: "2026-10-12"
+    url: "https://github.com/theomgdev/OdyssNet"
+    repository-code: "https://github.com/theomgdev/OdyssNet"
+    license: MIT
+    notes: "Source of the core architecture: one shared N x N matrix with a hard-zero diagonal, per-step RMSNorm on the state, and a state detached at the call boundary. Reference only — not a dependency of this package."

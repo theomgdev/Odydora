@@ -21,6 +21,39 @@ for chunk in trace:                                     # 1k tokens at a time
 
 One `W`, one `down`, one `up`, one mixing rate — shared by all 28 layers.
 
+## Lineage: this comes from OdyssNet
+
+The architectural idea here is not new work. It is borrowed from
+**[OdyssNet](https://github.com/theomgdev/OdyssNet)** (Karahan, v4.0.0, MIT),
+which demonstrates that *temporal* depth can replace *spatial* depth: a single
+fully connected `N × N` matrix with a hard-zero diagonal, through which signals
+echo for many timesteps, solves non-linear problems with zero hidden layers —
+90.14% on MNIST with 480 parameters.
+
+Three mechanisms are taken directly from it, and they are the load-bearing ones:
+
+- **One shared `N × N` matrix with `W.diagonal() == 0`**, applied identically at
+  every step, with self-connections living outside `W`.
+- **Per-step RMSNorm on the state**, which is what makes a chaotic recurrence
+  trainable at all rather than merely stable.
+- **A state detached at the call boundary**, so information crosses forward
+  while gradient does not — OdyssNet's `forward` leaves `self.state` detached,
+  which is the property that makes chunked training possible.
+
+What Odydora changes is where the matrix lives. OdyssNet *is* the network;
+here the same core is a small adapter steering a frozen pretrained transformer,
+advancing at segment rate rather than per step, with a convex state mix added
+because a frozen host and a 30,000-token document expose a forgetting problem
+that OdyssNet's own tasks did not.
+
+Deliberately **not** carried over: Hebbian plasticity (`hebb_type`) and temporal
+attention (`attn_heads`). Both are expensive, and OdyssNet's own controlled A/Bs
+leave them unproven as wins — so they are out until something here needs them.
+
+OdyssNet is a reference, not a dependency: nothing in this package imports or
+vendors it. Its measurements are quoted as its own and are not evidence about
+this project; see `CITATION.cff` for how to cite both.
+
 ## Why it is shaped this way
 
 Every number below was measured on this hardware, not taken from a paper.

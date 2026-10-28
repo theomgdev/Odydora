@@ -52,7 +52,9 @@ runs**, not the convenient one.
 
 ## Design constraints that are not negotiable
 
-These came out of measurement and undoing one silently breaks the architecture:
+The first three are inherited from [OdyssNet](https://github.com/theomgdev/OdyssNet)
+(Karahan, v4.0.0, MIT), which this architecture is built on; the rest came out of
+measurement here. Undoing one silently breaks the architecture:
 
 - **`W.diagonal()` stays zero**, enforced at init *and* on the gradient.
   Self-connections belong to the host residual stream.

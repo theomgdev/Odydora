@@ -29,6 +29,13 @@ One tiny `N x N` matrix, shared by every decoder layer, carrying state across
 layers **and** across chunk boundaries. The frozen 4-bit transformer is the
 limbic system; the core is the frontal cortex steering it.
 
+The core architecture is borrowed from
+**[OdyssNet](https://github.com/theomgdev/OdyssNet)** (Karahan, v4.0.0, MIT):
+one shared `N x N` matrix with a hard-zero diagonal under per-step RMSNorm,
+with the state detached at the call boundary. Odydora adapts it to steer a
+frozen host at segment rate. Reference, not a dependency — cite both
+(`CITATION.cff`).
+
 **Watch one number per stage.** S1: held-out bits/token below the step-0 value.
 S2: tail bits/token below the matched-parameter adapter-only arm. Nothing else
 matters until those move.
@@ -50,7 +57,8 @@ absolutes.
   step is kernel-launch-bound, so cost tracks the number of state updates and
   not the arithmetic. `STRIDE` is the throughput lever.
 - The state sits on the `sqrt(N)` sphere exactly (8.000 at N=64, constant over
-  4,000 steps) because RMSNorm runs every step. Explosion is structurally
+  4,000 steps) because RMSNorm runs every step — OdyssNet's mechanism, and the
+  reason no spectral constraint is needed. Explosion is structurally
   impossible; **forgetting** is the real failure, which is what `MIX` exists to
   prevent (influence after 1,024 steps: 5.8e-01 at mix 0.02, 2.0e-34 at 1.0).
 - Core parameters are **independent of depth**: 266,240 at N=64 whether 1 layer

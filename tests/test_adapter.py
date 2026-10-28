@@ -6,7 +6,7 @@ from transformers import (
     Qwen2ForCausalLM,
 )
 
-from odydora.adapter import attach_core
+from odydora.adapter import attach_core, count_parameters
 from odydora.core import RecurrentCore
 
 
@@ -98,3 +98,34 @@ def test_carried_state_is_detached_so_chunks_do_not_grow_the_graph():
     for value in model.odydora_state().values():
         assert value.grad_fn is None
         assert not value.requires_grad
+
+
+def test_the_core_attaches_through_a_peft_wrapper():
+    """The real build order is adapter first, then core, and PEFT nests the
+    host twice: a bare Qwen3 keeps its blocks at `model.layers` while a
+    PeftModel puts the same blocks at `base_model.model.model.layers`. A
+    fixed path list finds nothing there, which crashed `build()` on the
+    first real 4-bit call while every unit test here stayed green -- the
+    tests were attaching the core without PEFT in the way.
+    """
+    from peft import LoraConfig, get_peft_model
+
+    torch.manual_seed(0)
+    wrapped = get_peft_model(
+        tiny_qwen(),
+        LoraConfig(r=8, target_modules=["q_proj", "v_proj"], task_type="CAUSAL_LM"),
+    )
+    model = attach_core(wrapped, n=16, stride=4, freeze_base=False)
+    assert len(model.odydora_layers) == 2
+
+    ids = torch.randint(0, 128, (1, 16))
+    model.odydora_reset_state()
+    model(input_ids=ids, labels=ids).loss.backward()
+    assert model.odydora_calls() == 2, "the hook did not fire on both blocks"
+
+    core = model.odydora_core
+    assert core.W.grad.abs().sum() > 0 or core.up.weight.grad.abs().sum() > 0
+    # Both families of trainable tensor must be present and separable.
+    adapter, core_params = count_parameters(model)
+    assert adapter > 0, "LoRA parameters were not counted"
+    assert core_params > 0, "core parameters were not counted"

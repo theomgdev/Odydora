@@ -23,7 +23,17 @@ _STACK_PATHS = (
 
 
 def _resolve_stack(model):
-    """Return (path, ModuleList) for the model's decoder blocks."""
+    """Return (path, ModuleList) for the model's decoder blocks.
+
+    Searched by structure rather than by a fixed path list, because the
+    path moves with the wrapper: a bare Qwen3 keeps its blocks at
+    `model.layers`, while `get_peft_model` nests the host twice and the
+    same blocks live at `base_model.model.model.layers`. A decoder block is
+    identified by carrying one of the attention attributes every supported
+    family uses, so a new wrapper or a new family needs no new entry here.
+    The literal paths are still tried first, since that is the common case
+    and an exact hit avoids walking the whole module tree.
+    """
     for path in _STACK_PATHS:
         node = model
         for part in path.split("."):
@@ -32,9 +42,18 @@ def _resolve_stack(model):
                 break
         if isinstance(node, nn.ModuleList) and len(node) > 0:
             return path, node
+
+    for name, module in model.named_modules():
+        if (
+            isinstance(module, nn.ModuleList)
+            and len(module) > 0
+            and any(hasattr(module[0], a) for a in ("self_attn", "attn", "attention"))
+        ):
+            return name, module
+
     raise ValueError(
-        "could not find a decoder stack on this model; looked for "
-        + ", ".join(_STACK_PATHS)
+        f"could not find a decoder stack on {type(model).__name__}: no "
+        "ModuleList whose first entry has self_attn/attn/attention"
     )
 
 

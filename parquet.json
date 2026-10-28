@@ -1,0 +1,55 @@
+{
+  "parquet_files": [
+    {
+      "dataset": "MoreThought/Fable-5.1-Max-Reasoning-Filtered-10000x",
+      "config": "default",
+      "split": "full",
+      "url": "https://huggingface.co/datasets/MoreThought/Fable-5.1-Max-Reasoning-Filtered-10000x/resolve/refs%2Fconvert%2Fparquet/default/full/0000.parquet",
+      "filename": "0000.parquet",
+      "size": 508935330
+    },
+    {
+      "dataset": "MoreThought/Fable-5.1-Max-Reasoning-Filtered-10000x",
+      "config": "default",
+      "split": "full",
+      "url": "https://huggingface.co/datasets/MoreThought/Fable-5.1-Max-Reasoning-Filtered-10000x/resolve/refs%2Fconvert%2Fparquet/default/full/0001.parquet",
+      "filename": "0001.parquet",
+      "size": 501853867
+    },
+    {
+      "dataset": "MoreThought/Fable-5.1-Max-Reasoning-Filtered-10000x",
+      "config": "default",
+      "split": "full",
+      "url": "https://huggingface.co/datasets/MoreThought/Fable-5.1-Max-Reasoning-Filtered-10000x/resolve/refs%2Fconvert%2Fparquet/default/full/0002.parquet",
+      "filename": "0002.parquet",
+      "size": 502287132
+    },
+    {
+      "dataset": "MoreThought/Fable-5.1-Max-Reasoning-Filtered-10000x",
+      "config": "default",
+      "split": "full",
+      "url": "https://huggingface.co/datasets/MoreThought/Fable-5.1-Max-Reasoning-Filtered-10000x/resolve/refs%2Fconvert%2Fparquet/default/full/0003.parquet",
+      "filename": "0003.parquet",
+      "size": 471560357
+    },
+    {
+      "dataset": "MoreThought/Fable-5.1-Max-Reasoning-Filtered-10000x",
+      "config": "default",
+      "split": "train",
+      "url": "https://huggingface.co/datasets/MoreThought/Fable-5.1-Max-Reasoning-Filtered-10000x/resolve/refs%2Fconvert%2Fparquet/default/train/0000.parquet",
+      "filename": "0000.parquet",
+      "size": 508041309
+    },
+    {
+      "dataset": "MoreThought/Fable-5.1-Max-Reasoning-Filtered-10000x",
+      "config": "default",
+      "split": "train",
+      "url": "https://huggingface.co/datasets/MoreThought/Fable-5.1-Max-Reasoning-Filtered-10000x/resolve/refs%2Fconvert%2Fparquet/default/train/0001.parquet",
+      "filename": "0001.parquet",
+      "size": 59247579
+    }
+  ],
+  "pending": [],
+  "failed": [],
+  "partial": false
+}

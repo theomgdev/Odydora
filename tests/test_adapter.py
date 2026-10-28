@@ -1,0 +1,100 @@
+import torch
+from transformers import (
+    GPT2Config,
+    GPT2LMHeadModel,
+    Qwen2Config,
+    Qwen2ForCausalLM,
+)
+
+from odydora.adapter import attach_core
+from odydora.core import RecurrentCore
+
+
+def tiny_gpt2():
+    return GPT2LMHeadModel(
+        GPT2Config(n_layer=2, n_head=2, n_embd=32, vocab_size=128, n_positions=64)
+    )
+
+
+def tiny_qwen():
+    return Qwen2ForCausalLM(
+        Qwen2Config(
+            num_hidden_layers=2,
+            hidden_size=32,
+            intermediate_size=64,
+            num_attention_heads=4,
+            num_key_value_heads=2,
+            vocab_size=128,
+            max_position_embeddings=64,
+        )
+    )
+
+
+def cores_of(model):
+    return [m for m in model.modules() if isinstance(m, RecurrentCore)]
+
+
+def test_one_core_is_shared_and_trained():
+    for build in (tiny_gpt2, tiny_qwen):
+        torch.manual_seed(0)
+        model = attach_core(build(), n=16, layers=(0, 1), window=4)
+        ids = torch.randint(0, 128, (2, 24))
+        model.odydora_reset_state()
+        model(input_ids=ids, labels=ids).loss.backward()
+        # modules() deduplicates a shared module, so exactly one core for two
+        # call sites IS the sharing property; the hook counter proves both
+        # boundaries actually ran it.
+        cores = cores_of(model)
+        assert len(cores) == 1, f"{build.__name__}: core is not shared"
+        assert model.odydora_calls() == 2, f"{build.__name__}: core not called per layer"
+        # At step 0 only the out side takes gradient (zero-init `up` blocks
+        # the path into W, as LoRA's B=0 blocks grad_A); after a few steps the
+        # whole core is learning. Both halves are asserted below.
+        assert cores[0].up.weight.grad.abs().sum() > 0, f"{build.__name__}: up dead"
+
+        opt = torch.optim.SGD([p for p in model.parameters() if p.requires_grad], lr=0.05)
+        for _ in range(3):
+            opt.zero_grad()
+            model.odydora_reset_state()
+            model(input_ids=ids, labels=ids).loss.backward()
+            opt.step()
+        assert cores[0].W.grad.abs().sum() > 0, f"{build.__name__}: W never learns"
+        assert cores[0].down.weight.grad.abs().sum() > 0
+
+
+def test_zero_gate_leaves_the_base_model_untouched():
+    for build in (tiny_gpt2, tiny_qwen):
+        torch.manual_seed(1)
+        base = build().eval()
+        ids = torch.randint(0, 128, (1, 16))
+        with torch.no_grad():
+            before = base(input_ids=ids).logits
+        model = attach_core(base, n=16, layers=(0, 1), window=4).eval()
+        with torch.no_grad():
+            after = model(input_ids=ids).logits
+        assert torch.equal(before, after), f"{build.__name__}: core is not identity"
+
+
+def test_state_carries_across_calls_and_resets_on_demand():
+    torch.manual_seed(2)
+    model = attach_core(tiny_qwen(), n=16, layers=(0, 1), window=4).eval()
+    ids = torch.randint(0, 128, (1, 12))
+    model.odydora_reset_state()
+    with torch.no_grad():
+        model(input_ids=ids)
+    carried = model.odydora_state()
+    assert set(carried) == {0, 1}
+    assert all(v is not None and torch.isfinite(v).all() for v in carried.values())
+    model.odydora_reset_state()
+    assert all(v is None for v in model.odydora_state().values())
+
+
+def test_carried_state_is_detached_so_chunks_do_not_grow_the_graph():
+    torch.manual_seed(3)
+    model = attach_core(tiny_qwen(), n=16, layers=(0, 1), window=4)
+    ids = torch.randint(0, 128, (1, 12))
+    model.odydora_reset_state()
+    model(input_ids=ids, labels=ids).loss.backward()
+    for value in model.odydora_state().values():
+        assert value.grad_fn is None
+        assert not value.requires_grad

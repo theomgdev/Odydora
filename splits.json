@@ -1,0 +1,16 @@
+{
+  "splits": [
+    {
+      "dataset": "MoreThought/Fable-5.1-Max-Reasoning-Filtered-10000x",
+      "config": "default",
+      "split": "train"
+    },
+    {
+      "dataset": "MoreThought/Fable-5.1-Max-Reasoning-Filtered-10000x",
+      "config": "default",
+      "split": "full"
+    }
+  ],
+  "pending": [],
+  "failed": []
+}

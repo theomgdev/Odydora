@@ -1,0 +1,1210 @@
+{
+  "dataset": "MoreThought/Fable-5.1-Max-Reasoning-Filtered-10000x",
+  "config": "default",
+  "split": "full",
+  "features": [
+    {
+      "feature_idx": 0,
+      "name": "messages",
+      "type": {
+        "feature": {
+          "_type": "Json"
+        },
+        "_type": "List"
+      }
+    },
+    {
+      "feature_idx": 1,
+      "name": "tools",
+      "type": {
+        "feature": {
+          "type": {
+            "dtype": "string",
+            "_type": "Value"
+          },
+          "function": {
+            "name": {
+              "dtype": "string",
+              "_type": "Value"
+            },
+            "description": {
+              "dtype": "string",
+              "_type": "Value"
+            },
+            "parameters": {
+              "type": {
+                "dtype": "string",
+                "_type": "Value"
+              },
+              "properties": {
+                "_type": "Json"
+              },
+              "required": {
+                "feature": {
+                  "dtype": "string",
+                  "_type": "Value"
+                },
+                "_type": "List"
+              }
+            }
+          }
+        },
+        "_type": "List"
+      }
+    }
+  ],
+  "rows": [
+    {
+      "row_idx": 0,
+      "row": {
+        "messages": [
+          {
+            "role": "system",
+            "content": "You are an autonomous coding agent running on the user's machine.\n\nYou work in the current directory of a real repository. Use your tools to read, search, create, and edit files and to run shell commands (tests, builds, type-checkers). Some tools are deferred: only their names are known until you load their schemas with ToolSearch. Depending on the environment, some tools may be unavailable or without network access; if a tool call fails, adapt and continue with what is available. Never guess at the contents of a file you have not read, and never claim a fix works without running the verification yourself.\n\nMethod:\n1. Reproduce first. Read the relevant code and run the failing command before changing anything.\n2. Form a hypothesis about the root cause; make the smallest edit that tests it.\n3. Verify. Rerun the tests/build after every meaningful change. If it still fails, re-read the output carefully \u2014 do not repeat the same edit.\n4. Fix the cause, not the symptom.\n\nRules:\n- Never modify tests to make them pass, unless the user explicitly says the tests are wrong.\n- Keep edits minimal and consistent with the existing code style.\n- End with a brief summary: the root cause, what you changed, and proof that it passes."
+          },
+          {
+            "role": "user",
+            "content": "# Wave-4 authoring-agent preamble (read this first, follow exactly)\n\nYou are authoring seeds for the fable-code training-data pipeline. Repo root:\nthis directory. Everything below is mandatory.\n\n## Read before writing anything\n\n1. `tasks/SEED_SPEC.md` \u2014 the seed spec, quality bar, and mandatory\n   self-check. It is the law.\n2. The \"Additional authoring constraints\" section of\n   `tasks/WAVE4_USECASES.md` \u2014 wave-4 extensions (loopback HTTP allowed for\n   web seeds, sqlite3 allowed where SQL serves the task, refactor/perf seed\n   mechanics, repo-scale sizing).\n3. One existing seed of the same kind as yours, as a formatting example\n   (e.g. `tasks/seeds/py-cron-next` for build, `tasks/seeds/py-tree-filters`\n   for feature; `ls tasks/seeds/` and pick something close).\n\n## Scope and etiquette\n\n- `ls tasks/seeds/` FIRST. Your ids must be new (`<lang>-<slug>`), your\n  domains must not re-skin an existing seed \u2014 when the catalog's angle\n  overlaps an existing seed, differentiate sharply (different layer,\n  different API surface) and say so in a comment in your final report.\n- Touch ONLY `tasks/seeds/<your-ids>/` and `workspaces/<your-ids>/`. Never\n  edit `src/`, `config.json`, other seeds, PROGRESS.md, or scripts.\n- Python workspaces: `rm -rf workspaces/<id>/__pycache__` BEFORE generating\n  `reference_fix.patch`, or the patch is polluted.\n- Debug seeds: the prompt is symptom-first, user-voice, and NEVER names the\n  guilty file, function, or root cause. Bugs must look innocent in isolation.\n  If anything is timing/concurrency adjacent, run the verify 5\u00d7 and make\n  sure it fails/passes deterministically every time.\n- Vocabulary hygiene (2026-07-13, after a teacher-side safety-classifier\n  false-positive refused an innocuous parser-debug seed): keep prompts,\n  comments, and fixtures mundane in tone \u2014 everyday QA/ops framing, no\n  attacker-flavored words (attack/exploit/smuggle/forge/hostile/malicious)\n  where a neutral word works, no fixtures styled as exploit PoCs. This is\n  wording only; NEVER weaken what the tests actually pin.\n- The mandatory self-check in SEED_SPEC.md (smoke `--only` YOUR ids only \u2192\n  materialize \u2192 reference solution passes in `workspaces/<id>` \u2192 save\n  non-empty patch that touches no test files \u2192 re-smoke) is not optional.\n  A seed you didn't self-check is a seed you didn't finish.\n- NEVER run trace generation (`--task`, `--all`, `run_batch.sh`), never call\n  any model server, no GPU anything, no git commit/push (the orchestrator\n  commits), no files outside the repo (no /tmp, no $HOME).\n\n## Final report (your last message)\n\nFor each seed: id, kind-category, one-line description, smoke result line,\nreference verify result. Plus any domain-overlap notes. Nothing else.\n\n\nYou are running as the one author for wave 6, chunk 6P1.\nAuthor only the 6 missing catalog items below. Preserve any\nalready-authored seeds. In every new task.json add this exact provenance shape:\n\n  \"catalog\": {\"wave\": 6, \"chunk\": \"6P1\", \"index\": N}\n\nwhere N is the item's catalog number. There must be exactly one seed per item\nand no duplicate slot. Follow the catalog's wave-wide laws as well as the\nauthoring preamble. Do not generate teacher traces and do not call another\nmodel. Complete every local audit, smoke, reference-patch, and verification\ngate before finishing.\n\nCatalog source: tasks/WAVE6_USECASES.md\nCatalog heading: ### Chunk 6P1 \u2014 core syntax & CLI ergonomics \u00d76\n\nMISSING ITEMS\n=============\nCatalog item 1:\nbuild: `[CmdletBinding()]`/`param()` CLI \u2014 typed params,\n   `[ValidateSet()]`, `[ValidatePattern()]`, `[Parameter(Mandatory)]`\n   handled non-interactively (mandatory-miss must ERROR under\n   -NoProfile -File, not prompt), pinned usage text on `-Help` switch,\n   exit contract 0/64/65 (vs bash-subcmd: the pins here are attribute\n   metadata + typed binding, not getopts)\n\nCatalog item 2:\nbuild: subcommand dispatcher \u2014 `init|add|report` via `switch` on\n   `$args[0]` + per-command param splatting from a hashtable; unknown\n   command \u2192 pinned usage, 64\n\nCatalog item 3:\nbuild: switch/flag semantics \u2014 `[switch]` params incl. `-Flag:$false`\n   explicit negation, coercion table pinned, `$PSBoundParameters`\n   introspection report\n\nCatalog item 4:\nbuild: splatting + defaults resolver \u2014 defaults hashtable < config\n   file < explicit args (precedence pinned); emits the RESOLVED\n   invocation as ordinal-sorted `key=value` lines\n\nCatalog item 5:\nbuild: argument-forwarding runner \u2014 invokes a child pwsh script\n   forwarding `@args` faithfully (spaces, empty strings, `-`-leading\n   values preserved); pinned round-trip manifest (bash-argfwd's DEBUG\n   lesson recast as a BUILD spec: PowerShell arrays do not word-split)\n\nCatalog item 6:\ndebug: parameter-set ambiguity \u2014 two `[Parameter(ParameterSetName=\u2026)]`\n   sets error with \"Parameter set cannot be resolved\" for a documented\n   call shape; symptom-first (the failing invocation is pasted), fix =\n   correct set membership + `DefaultParameterSetName`\n"
+          },
+          {
+            "role": "assistant",
+            "content": "I'll start by reading the required specs and checking the existing seed catalog."
+          },
+          {
+            "role": "assistant",
+            "content": null,
+            "tool_calls": [
+              {
+                "id": "call_0",
+                "type": "function",
+                "function": {
+                  "name": "unknown_tool",
+                  "arguments": "{}"
+                }
+              },
+              {
+                "id": "call_1",
+                "type": "function",
+                "function": {
+                  "name": "unknown_tool",
+                  "arguments": "{}"
+                }
+              }
+            ]
+          },
+          {
+            "role": "tool",
+            "tool_call_id": "call_0",
+            "name": "unknown_tool",
+            "content": "bash-argfwd\nbash-dotlink\nbash-dureport\nbash-feedmix\nbash-filedrop\nbash-fixedw\nbash-flockq\nbash-inventory\nbash-jobpool\nbash-jqreport\nbash-ledgersnap\nbash-logtop\nbash-lostcount\nbash-mdtoc\nbash-microtap\nbash-nulwalk\nbash-offload\nbash-pathfind\nbash-photosort\nbash-poolsheet\nbash-quoteargs\nbash-relgate\nbash-retryrun\nbash-scratchprune\nbash-sedbatch\nbash-seqrename\nbash-shiftnote\nbash-strlib\nbash-subcmd\nbash-teetrap\nbash-trapclean\nbash-trayaudit\nbash-tsvjoin\nc-bitvec\nc-chimeplan\nc-coldvan\nc-confpool\nc-csvrow\nc-dusweep\nc-dynarray\nc-grainband\nc-gritroute\nc-hashslot\nc-iniscan\nc-kvunesc\nc-lrulink\nc-nurserylot\nc-panelframe\nc-recfile\nc-reportfix\nc-ringbuf\nc-snowroute\nc-tidechart\nc-toksplit\nc-ventplan\ncpp-cellarlog\ncpp-clinicqueue\ncpp-exprvisit\ncpp-fairride\ncpp-filterview\ncpp-inlinevec\ncpp-medaltally\ncpp-mortarmix\ncpp-quiltgrid\ncpp-raiiguard\ncpp-refcard\ncpp-shopreport\ncpp-turnstile\ncpp-vatstats\ncsharp-bagline\ncsharp-dockledger\ncsharp-ferryhub\ncsharp-gazetterun\ncsharp-gearrepo\ncsharp-kennelcard\ncsharp-labelkit\ncsharp-laserjob\ncsharp-marketcart\ncsharp-microfiche\ncsharp-museumloan\ncsharp-obsrun\ncsharp-orchardsales\ncsharp-outfitter\ncsharp-patchbay\ncsharp-pathreport\ncsharp-plotspool\ncsharp-pressquote\ncsharp-propsquote\ncsharp-replicaread\ncsharp-roastqueue\ncsharp-swimheats\ncsharp-toollend\ncsharp-wiredepot\ngo-arcpack\ngo-backoff\ngo-batch-flush\ngo-birdsurvey\ngo-bloomset\ngo-buildgraph\ngo-bunkboard\ngo-burst-runner\ngo-calibcli\ngo-checkpoint\ngo-cidrkit\ngo-circuit-breaker\ngo-cmdline\ngo-cronsched\ngo-csv-decode\ngo-csv-report\ngo-dashfeed\ngo-dirwalk\ngo-dirwatch\ngo-dlpool\ngo-dupfinder\ngo-edgeproxy\ngo-envrender\ngo-eventbus\ngo-fair-semaphore\ngo-farebands\ngo-fieldquote\ngo-flagbind\ngo-flagengine\ngo-flowrun\ngo-flowschema\ngo-framebuf\ngo-globmatch\ngo-group-runner\ngo-hashring\ngo-healbudget\ngo-histogram\ngo-hit-stats\ngo-httpretry\ngo-idxplan\ngo-indexpq\ngo-interval-merge\ngo-inventory-api\ngo-job-drain\ngo-jobargs\ngo-jobflow\ngo-kvlog\ngo-kvwal\ngo-layered-config\ngo-ledger-apply\ngo-logfmt\ngo-logrotate\ngo-logtail\ngo-lru-cache\ngo-lzrle\ngo-manifest-load\ngo-metrics\ngo-migrunner\ngo-modcycles\ngo-money\ngo-mwchain\ngo-orderfsm\ngo-outbox\ngo-packslip\ngo-pagewalk\ngo-path-router\ngo-planttags\ngo-protoseq\ngo-provider2\ngo-pubsub\ngo-quotasvc\ngo-record-import\ngo-reldrift\ngo-resumeup\ngo-retry\ngo-reviewflag\ngo-ringbuf\ngo-sawplan\ngo-session-store\ngo-shardplan\ngo-shiplog\ngo-snapprune\ngo-snipdoc\ngo-sortid\ngo-spanoverlap\ngo-statuspoll\ngo-stockroom\ngo-streamdiff\ngo-supervisor\ngo-switchcase\ngo-syncdelta\ngo-taskrunner\ngo-telewire\ngo-text-preview\ngo-textindex\ngo-thumbwarm\ngo-timeout-fetch\ngo-token-bucket\ngo-trailperm\ngo-treehash\ngo-tripsettle\ngo-tseries\ngo-ttl-map\ngo-txnredo\ngo-unitreg\ngo-uploadgate\ngo-urlshort\ngo-word-tally\ngo-wordfreq\ngo-worker-pool\ngo-xmlenvelope\njava-bakeplan\njava-berthops\njava-blockreport\njava-bloomroute\njava-boxseat\njava-campboard\njava-canneryline\njava-collectk\njava-crewboard\njava-droproute\njava-dupsight\njava-farerules\njava-forgebill\njava-garagedeck\njava-globpat\njava-jsongate\njava-leasepool\njava-ledyield\njava-liftcsv\njava-lookoutlog\njava-loomplan\njava-lotsheet\njava-meterfeed\njava-printspec\njava-recordval\njava-rxrefill\njava-setlist\njava-stageflow\njava-swipelog\njava-tollstmt\njava-tramclock\njava-typedbus\njava-tzslots\njava-woolbale\njs-classkit\njs-fleetintake\njs-labtrack\njs-rolloutgate\njs-roomsapi\njs-sitesched\npy-a11yaudit\npy-access-log-report\npy-alert-rules\npy-ansi-paginate\npy-archive-cli\npy-argkit\npy-backup-lock\npy-backup-manifest\npy-base32-check\npy-battcurve\npy-billing-cycles\npy-bin-records\npy-bookmark-vault\npy-btree-pages\npy-campaign-templates\npy-cart-discounts\npy-changelog-compile\npy-checkout-totals\npy-click-shiftlog\npy-clientsplit\npy-config-merge\npy-config-migrate\npy-conneg\npy-contact-book\npy-contacts-wsgi\npy-cookie-sessions\npy-cron-next\npy-csv-schema\npy-csv-sqlite\npy-ctxescape\npy-cursorfeed\npy-date-formats\npy-dep-resolve\npy-dungeon-state\npy-dupreport\npy-dyelot\npy-event-replay\npy-event-sched\npy-ewma-alarm\npy-expense-tracker\npy-export-batch\npy-expr-eval\npy-file-organizer\npy-flag-warmup\npy-flashcard-srs\npy-flaskapi\npy-flowlint\npy-flowplan\npy-fsmcore\npy-fsmmin\npy-fuzzy-suggest\npy-gaugelog\npy-glob-match\npy-gradebook\npy-habit-streaks\npy-hookrelay\npy-htmlclean\npy-ibantool\npy-incident-cli\npy-ini-interp\npy-intake-forms\npy-inventory-log\npy-invoice-currency\npy-job-timeout\npy-jsonpath-edit\npy-laneroster\npy-ledger-asof\npy-library-lending\npy-log-analyzer\npy-logmerge\npy-lru-eviction\npy-magstripe\npy-md-inline\npy-menucost\npy-meter-etl\npy-multipart-form\npy-mvcc-store\npy-netstring-bus\npy-note-query\npy-notes-api\npy-notify-coalesce\npy-orderdesk\npy-pandas-pivot\npy-pantrykit\npy-parcelstamp\npy-parking-garage\npy-password-meter\npy-pick-reconcile\npy-platecalc\npy-plugin-hooks\npy-pool-dispatch\npy-progress-bars\npy-pydantic-catalog\npy-quarrylog\npy-rate-window\npy-recipe-box\npy-reminder-engine\npy-requests-pager\npy-reqvalid-mw\npy-retention-lint\npy-retry-policy\npy-reusewf\npy-role-hierarchy\npy-rss-builder\npy-scanfeed\npy-sched-audit\npy-scrub-pipeline\npy-seat-holds\npy-sensor-ingest\npy-sensorgrid\npy-session-prune\npy-sessionclient\npy-shell-lex\npy-shoot-import\npy-size-duration\npy-skills-assess\npy-slide-splitter\npy-slugify\npy-spokeshop\npy-sqla-music\npy-stackcost\npy-static-serve\npy-static-site\npy-stats-registry\npy-status-fanout\npy-steprunner\npy-stmt-reconcile\npy-storesales\npy-stream-stats\npy-survey-engine\npy-sync-plan\npy-syncdrift\npy-table-export\npy-tagscan\npy-tankcfg\npy-task-runner\npy-telemetry-batch\npy-text-pipeline\npy-text-table\npy-ticket-triage\npy-timeclock\npy-tmpl-compile\npy-todo-cli\npy-token-bucket\npy-tokenflow\npy-tool-capture\npy-tree-filters\npy-trie-suggest\npy-undo-stack\npy-undo-tree\npy-unified-diff\npy-upload-sniff\npy-urlkit\npy-usage-sessions\npy-visitpass\npy-wallet-transfer\npy-warehouse-bins\npy-webhook-verify\npy-wiki-compiler\npy-workboard\npy-workout-log\npy-wrap-justify\npy-yamlquote\nrb-boatslip\nrb-chorewheel\nrb-desknotes\nrb-dirtymod\nrb-fleetdesk\nrb-hivelog\nrb-kilncfg\nrb-mailmerge\nrb-pdfjobs\nrb-printopts\nrb-rainspark\nrb-routeq\nrb-shellsplit\nrb-stallbook\nrb-tilerack\nrb-vanpool\nrb-yarnbin\nrs-cfgparse\nrs-charslice\nrs-cidermill\nrs-cliargs\nrs-cragstats\nrs-cuesheet\nrs-darkroom\nrs-freightquote\nrs-gatebadge\nrs-handleheap\nrs-intervalset\nrs-irrplan\nrs-iteradapt\nrs-logingest\nrs-mapreport\nrs-millreport\nrs-mpscpipe\nrs-multiscan\nrs-nansort\nrs-postrate\nrs-rategate\nrs-rcweaktree\nrs-ropelite\nrs-rpnvm\nrs-scopedproc\nrs-seatmap\nrs-shelftag\nrs-signalbox\nrs-sizecast\nrs-slabarena\nrs-swapremove\nrs-taskdeps\nrs-textstats\nrs-themecss\nrs-tillroll\nrs-tomlite\nrs-toolshed\nrs-unescape\nrs-varint\nrs-weighbridge\nrs-weightavg\nrs-wximport\nts-apierrs\nts-approval-flow\nts-async-memoize\nts-async-pipe\nts-batch-loader\nts-bikedock\nts-billing-dates\nts-bizhours\nts-body-parser\nts-bookmarks-api\nts-breadcrumb-trail\nts-bufferpool\nts-bulkship\nts-callstitch\nts-cancel-pipeline\nts-cart-total\nts-cascade\nts-checkout-session\nts-color-utils\nts-config-merge3\nts-connfsm\nts-cookie-kit\nts-cors-policy\nts-crdt-text\nts-cssmatch\nts-csv-codec\nts-csv-mapper\nts-datagrid\nts-debounce-throttle\nts-deep-diff\nts-deploy-render\nts-emitlog\nts-envfile\nts-episode-import\nts-event-emitter\nts-expense-split\nts-exprflow\nts-form-async-validate\nts-form-validator\nts-formcodec\nts-formfield\nts-forwait\nts-fsm-lib\nts-fuellog\nts-fulfillment\nts-geo-client\nts-healthgate\nts-hookslite\nts-html-entities\nts-http-freshness\nts-i18n-catalog\nts-ics-lite\nts-inflect\nts-input-mask\nts-invoice-render\nts-iso-duration\nts-job-queue\nts-json-pointer\nts-jsonquote\nts-jsonrpc\nts-kanban\nts-keyedrecon\nts-kv-transactions\nts-letter-merge\nts-line-splitter\nts-lockdiff\nts-lockermap\nts-logql\nts-lru-ttl-cache\nts-mailroster\nts-mapkit\nts-md-toc\nts-mention-scan\nts-meter-stats\nts-middleware-runner\nts-migrations\nts-money-fmt\nts-msgfmt\nts-notification-center\nts-optimistic-store\nts-order-totals\nts-pagination\nts-plotroster\nts-promise-pool\nts-promoline\nts-qs-codec\nts-quiz-standings\nts-rate-limiter\nts-rategate\nts-recur-cal\nts-reglob\nts-rel-query\nts-relative-time\nts-relnotes\nts-report-columns\nts-reportcard\nts-retry-abort\nts-route-match\nts-scene-shapes\nts-schema-validate\nts-semver-ranges\nts-session-sweep\nts-shortcut-registry\nts-signfleet\nts-singleflight\nts-sitepress\nts-skatehire\nts-snippet-highlight\nts-spreadsheet\nts-sqlemit\nts-sqlplan\nts-ssefeed\nts-statechart\nts-static-blog\nts-stock-ledger\nts-stream-response\nts-survey-drafts\nts-tabskit\nts-tallysheet\nts-text-adventure\nts-ticket-triage\nts-tile-cache\nts-tmpl-engine\nts-undo-manager\nts-virtual-scheduler\nts-washcycle\nts-webhook-fanout\nts-webhooksub\nts-wizard\nts-yamlite\nzsh-argshow\nzsh-arrlib\nzsh-assocrep\nzsh-backupsel\nzsh-cronsplit\nzsh-expandkit\nzsh-extglob\nzsh-floatrep\nzsh-frostwatch\nzsh-globpick\nzsh-portwrap\nzsh-pullfeeds\nzsh-scanrun\nzsh-zparse"
+          },
+          {
+            "role": "tool",
+            "tool_call_id": "call_1",
+            "name": "unknown_tool",
+            "content": "# Seed authoring spec\n\nA **seed** is one software-engineering task the teacher (headless Fable 5)\nwill solve on camera. Seeds are the quality ceiling of the whole dataset: a\nlazy seed makes a lazy trace makes a worse model.\n\nFour kinds, all sharing the same layout and verification:\n\n- **debug** \u2014 a realistic program with realistic bug(s); tests fail until the\n  bug is found and fixed.\n- **build** \u2014 tests ship in `files/`, the implementation doesn't. The prompt\n  is a feature spec; tests are the acceptance contract. Verify fails until\n  the module is built (import/compile error counts as failing).\n- **feature** \u2014 a small *working* codebase plus new acceptance tests for a\n  feature that doesn't exist yet; old behavior must keep working.\n- **project** \u2014 build a full mini-project from a spec: 3\u20138 files (CLI +\n  lib + persistence/IO layers), tests exercise it end to end. These produce\n  the long, multi-file, design-then-implement traces we most want.\n\n## Layout\n\n```\ntasks/seeds/<id>/\n  task.json              # metadata (below)\n  files/                 # copied verbatim into the teacher's workspace \u2014 NOTHING ELSE IS\n    <source files>\n    <test file(s)>\n  reference_fix.patch    # OUTSIDE files/: proof the task is solvable (never shown to teacher)\n```\n\n`task.json`:\n\n```json\n{\n  \"id\": \"py-csv-quoted-fields\",\n  \"lang\": \"python\",                       // python|ts|go|rust|java|ruby|bash|zsh|c|cpp|csharp|powershell|asm\n  \"category\": \"debug-parsing\",            // \"<kind>-<family>\", e.g. build-lib, project-cli, feature-api, debug-async\n  \"prompt\": \"<user-voice request, see below>\",\n  \"verify_cmd\": \"python3 test_csv.py\",    // ONE command, shlex-split (no &&, |, ;), <180s\n  \"test_files\": [\"test_csv.py\"]           // protected: teacher modifying these = trace rejected\n}\n```\n\nOptional fields (Part C deps seeds and later, sanctioned 2026-07-14):\n\n- `\"reference_setup\"`: ONE shlex-split command that `validate_seeds.py` runs\n  AFTER applying the reference patch and BEFORE verify (builds the reference\n  env: `python3 -m venv \u2026 && pip install` wrapped in a setup script, `npm ci`,\n  \u2026). Registry network is sanctioned during it. It must not touch protected\n  test files (hash-checked). Only deps seeds need it \u2014 stdlib seeds omit it.\n- `\"verify_timeout\"`: seconds (int, max 360) for install-heavy verifies;\n  default 180 when absent. Honored by smoke, validate, and trace verify.\n\nVerify conventions (toolchains on this box: node 26.3, go 1.26, python 3.x):\n\n- python: `python3 test_x.py` \u2014 plain `assert`s in a `main()`, stdlib only, no pytest.\n  Every Python seed ships `files/.gitignore` with `__pycache__/`, `*.py[cod]`,\n  and the exact names of any fixtures its verification command writes. Test\n  output is execution evidence and must never enter a candidate patch.\n  (EXCEPTION: Part C deps seeds use `bash run_verify.sh` \u2192 `.venv/bin/python -m pytest -q`,\n  with pytest itself a pinned dep)\n- ts:     `node --test test_x.ts` \u2014 `node:test` + `node:assert/strict`, no npm deps, no package.json.\n  Part C dependency exceptions that run `npm ci` must ship a\n  `files/.gitignore` containing `node_modules/`; installed dependencies are\n  execution evidence, never candidate patch content.\n- go:     `go test -race -timeout 30s ./...` \u2014 needs a minimal `go.mod` in files/ (`module <id>` / `go 1.26`)\n- rust:   `cargo test --offline` \u2014 files/ = full cargo crate: `Cargo.toml`\n  (name=<id>, edition 2021, no deps), `src/` (+ `tests/` for integration\n  tests), and a `.gitignore` containing `/target` \u2014 REQUIRED, it is the\n  pycache-analog: without it `git add -A` sweeps build artifacts into\n  reference_fix.patch. Missing impl = compile error = failing baseline (like\n  go). Debug seeds: cargo test runs debug profile, so overflow panics are\n  deterministic; HashMap-order bugs need \u226520 keys so an accidental pass is\n  implausible.\n- java:   `java TestMain.java` \u2014 files/ = sibling .java files run via the\n  multi-file source launcher (compiles the directory in-memory, no .class\n  artifacts \u2192 no patch pollution). Use explicit check/throw helpers, NOT the\n  `assert` keyword (needs -ea and reads as optional). Pin Locale/timezone\n  explicitly in tests \u2014 never rely on host defaults. (brew openjdk 26 on PATH.)\n- ruby:   `ruby test_x.rb` \u2014 minitest is stdlib: `require \"minitest/autorun\"`.\n  Zero gems. brew ruby on PATH.\n- bash:   `bash test_x.sh` \u2014 self-contained harness, fixtures created by the harness in-workspace\n- zsh:    `zsh test_x.zsh` \u2014 zsh 5.9 native idioms (1-indexed, no implicit word-split)\n- c:      `make test` \u2014 Makefile ships in files/ AND is a protected test file;\n  `-std=c17 -Wall -Wextra -Werror`; tiny TEST()-macro header per seed\n  (canonical `mintest.h`: tasks/seeds/c-toksplit/files/mintest.h). NO\n  sanitizer flags \u2014 gcc 16.1.1's ASan/UBSan runtimes are absent on this box\n  (libasan.so.8 missing, no static archives; probed 2026-07-14). Memory-bug\n  debug seeds must make corruption OBSERVABLE deterministically instead\n  (e.g. overflow lands in an adjacent struct member that tests read back\n  byte-exactly); add `-g` only. Beware `-Werror=stringop-overflow`:\n  provably-OOB writes are rejected at compile time, so planted bugs must be\n  runtime-computed. Every C seed ships `files/.gitignore` naming its exact\n  test executable plus `/*.o` when the Makefile produces objects; compiler\n  outputs are verification evidence, never candidate patch content.\n- cpp:    `make test` \u2014 g++ `-std=c++20`, same make pattern as c, stdlib only;\n  `files/.gitignore` names the exact test executable (and `/*.o` if needed)\n- csharp: `dotnet test` \u2014 .NET 10, one xunit test project per seed (NuGet restore\n  at trace time is part of the deps curriculum), injectable clocks (no DateTime.Now)\n- powershell: `pwsh -NoProfile -File test_x.ps1` \u2014 wave-6 law (Set-StrictMode Latest,\n  ordinal sorts, no Format-* in contracts)\n- asm:    `bash test_x.sh` \u2192 `gcc -Wall -Wextra -Werror -o runner test_x.c x.s && ./runner`\n  \u2014 x86-64 GNU as AT&T, System V ABI, C-harness differential testing (wave-7 law)\n\n## Quality bar\n\n**The code** (debug/feature: the shipped-looking program; build/project: the\ntests and any starter files): a plausible slice of real software in a concrete\ndomain \u2014 not textbook exercises. Idiomatic, sensibly named, doing something a\nreal project needs. Debug programs ~30\u201390 lines; projects 3\u20138 files.\n\n**Debug bugs** (1\u20133, related): mistakes a competent human actually makes \u2014\noff-by-one at a boundary, aliased mutable state, identity vs equality, lost\n`this`, error shadowing, missing copy, wrong API assumption, race, leaked\nresource, unicode/byte confusion, float trap. NEVER a syntax error or a line\nthat looks obviously wrong. No `# BUG` comments, no winking variable names.\nThe buggy line must look innocent in isolation.\n\n**Build/feature/project specs**: concrete requirements with edge cases the\ntests actually check (empty input, conflicts, ordering, error cases,\npersistence across \"runs\"). The tests are the contract \u2014 comprehensive enough\nthat a half-implementation fails, including behavior the prompt only implies.\nFor projects, the prompt describes the deliverable like a ticket (what files/\ncommands should exist, example usage); leave design decisions to the agent.\n\n**The tests**: deterministic, hermetic (no network, no external services, no\nabsolute paths, no timing flakiness \u2014 if timing is inherent, use generous\nmargins and tiny delays), finish in seconds. Strong enough that a wrong or\npartial implementation still fails; they pin correct behavior, not\nimplementation details. Test names/messages describe expected behavior \u2014 for\ndebug seeds they must not spell out the bug or point at the guilty line.\n\n**The prompt**: user voice. Debug: the annoyed engineer, symptom-first\n(\"keys I just read are disappearing\"), how to reproduce, \"fix it and prove\nit, don't touch the tests\" \u2014 NEVER naming the root cause; diagnosis is what\nwe're training. Build/feature/project: the engineer with a ticket \u2014 what they\nneed built and why, requirements in their words, pointing at the acceptance\ntests as the contract. Vary the voice across seeds \u2014 terse, rambling, with\npasted error output or example transcripts, with a wrong guess about the\ncause, with strong opinions about structure.\n\n## Mandatory self-check (every seed, before you're done)\n\nFrom the repo root, with `<ids>` = comma-separated ids you authored:\n\n1. `python3 src/generate_traces.py --smoke --only <ids>` \u2192 every line `[ok  ]`\n   (verify FAILS on the starting workspace). `[BAD ]` means your tests pass\n   without the work being done \u2014 the seed has no teeth.\n2. Prove solvability: `python3 -c \"import sys; sys.path.insert(0,'src'); from common import *; [materialize(s) for s in load_seeds(only={'<id>'})]\"`,\n   then write your reference solution (the fix / the implementation / the\n   feature) into `workspaces/<id>/`, run the verify_cmd there \u2192 must PASS.\n   Save it: `git -C workspaces/<id> add -A && git -C workspaces/<id> diff HEAD > tasks/seeds/<id>/reference_fix.patch`\n   (patch must be non-empty and must not touch test files).\n3. Re-run step 1 (materialize in step 2 reset nothing in the seed; smoke must\n   still fail on the starting workspace).\n\n## Hard rules\n\n- Zero dependencies beyond each language's stdlib/builtin test runner.\n- Unique ids: `<lang>-<slug>`; check `ls tasks/seeds/` first; stay inside your\n  assigned domains so parallel authors can't collide.\n- Never modify existing seeds, `src/`, `config.json`, or anything outside\n  `tasks/seeds/<your ids>/` and your `workspaces/<your ids>/` scratch.\n- Do not run trace generation (`--task`/`--all`), do not call any model server,\n  no GPU anything. Authoring and smoke only.\n- Don't write files outside the repo (no /tmp).\n167"
+          },
+          {
+            "role": "assistant",
+            "content": "Now let me read the Wave 6 catalog and its wave-wide laws."
+          },
+          {
+            "role": "assistant",
+            "content": null,
+            "tool_calls": [
+              {
+                "id": "call_2",
+                "type": "function",
+                "function": {
+                  "name": "unknown_tool",
+                  "arguments": "{}"
+                }
+              },
+              {
+                "id": "call_3",
+                "type": "function",
+                "function": {
+                  "name": "unknown_tool",
+                  "arguments": "{}"
+                }
+              },
+              {
+                "id": "call_4",
+                "type": "function",
+                "function": {
+                  "name": "unknown_tool",
+                  "arguments": "{}"
+                }
+              },
+              {
+                "id": "call_5",
+                "type": "function",
+                "function": {
+                  "name": "constraints",
+                  "arguments": "extend SEED_SPEC.md; spec itself unchanged)\n50-\n51-- **Loopback HTTP is allowed and encouraged** for web seeds: go `net/http/\n52-  httptest`, py `wsgiref`/`http.server` on [IP_ADDRESS] ephemeral ports, ts\n53-  `node:http` with `server.listen(0)`. Still hermetic: never a real network.\n54-- **sqlite3 (py stdlib) is allowed** where a real SQL engine serves the task.\n55-- **Refactor seeds** are feature-kind mechanics with category\n56-  `refactor-<family>`: files/ ships a WORKING module whose current tests pass,\n57-  plus new acceptance tests that import the POST-refactor API (new module\n58-  layout / new function signatures) and re-pin the old behavior through it.\n59-  Baseline fails only because the new structure doesn't exist. Prompt = a\n60-  tech-debt ticket; explicitly forbids changing observable behavior.\n61-- **Perf seeds** are build- or feature-kind with category `perf-<family>`.\n62-  Verify gates MUST be deterministic \u2014 never wall-clock assertions:\n63-  - injectable operation counters (comparator calls, probe counts) with exact\n64-    or bounded assertions;\n65-  - go `testing.AllocsPerRun` allocation budgets;\n66-  - py `tracemalloc` peak-memory budgets with generous margins;\n67-  - feasibility gates: input sized so the naive algorithm cannot finish\n68-    inside the verify timeout but the intended one finishes in seconds\n69-    (document the margin in the test comment).\n70-- Repo-scale seeds ship 12\u201318 files in files/ \u2014 the navigation IS the task.\n71-  Debug prompts stay symptom-first; the guilty files are never named.\n72-\n73-## Chunk plan (one agent per chunk, ~6 seeds, in this order)\n74-\n75-### Chunk 1 \u2014 py web/API \u00d76\n76-1. build: WSGI JSON REST resource (\"contacts\") \u2014 routing table, method\n77-   dispatch, 405/404/400 semantics, pagination params, loopback-tested\n78-2. build: request-validation middleware \u2014 schema table per route, typed\n79-   errors as RFC7807-ish JSON bodies, header/query/body sources\n80-3. build: content-negotiation engine \u2014 Accept parsing, q-weights, wildcard\n81-   precedence, 406 fallback policies, vary header computation\n82-4. feature: cookie session store (working"
+                }
+              },
+              {
+                "id": "call_6",
+                "type": "function",
+                "function": {
+                  "name": "unknown_tool",
+                  "arguments": "{}"
+                }
+              },
+              {
+                "id": "call_7",
+                "type": "function",
+                "function": {
+                  "name": "unknown_tool",
+                  "arguments": "{}"
+                }
+              },
+              {
+                "id": "call_8",
+                "type": "function",
+                "function": {
+                  "name": "unknown_tool",
+                  "arguments": "{}"
+                }
+              },
+              {
+                "id": "call_9",
+                "type": "function",
+                "function": {
+                  "name": "unknown_tool",
+                  "arguments": "{}"
+                }
+              },
+              {
+                "id": "call_10",
+                "type": "function",
+                "function": {
+                  "name": "unknown_tool",
+                  "arguments": "{}"
+                }
+              },
+              {
+                "id": "call_11",
+                "type": "function",
+                "function": {
+                  "name": "unknown_tool",
+                  "arguments": "{}"
+                }
+              },
+              {
+                "id": "call_12",
+                "type": "function",
+                "function": {
+                  "name": "unknown_tool",
+                  "arguments": "{}"
+                }
+              },
+              {
+                "id": "call_13",
+                "type": "function",
+                "function": {
+                  "name": "unknown_tool",
+                  "arguments": "{}"
+                }
+              },
+              {
+                "id": "call_14",
+                "type": "function",
+                "function": {
+                  "name": "unknown_tool",
+                  "arguments": "{}"
+                }
+              }
+            ]
+          },
+          {
+            "role": "tool",
+            "tool_call_id": "call_2",
+            "name": "unknown_tool",
+            "content": "410 tasks/WAVE6_USECASES.md\n90:- **Harness law** (plain .ps1, no Pester): `Set-StrictMode -Version\n139:## Chunk plan (one agent per chunk, in this order)\n141:### Chunk 6P1 \u2014 core syntax & CLI ergonomics \u00d76\n167:### Chunk 6P2 \u2014 strings & text \u00d76\n195:### Chunk 6P3 \u2014 objects & pipeline \u00d76\n221:### Chunk 6P4 \u2014 filesystem & sysadmin reports \u00d76 (fixture-driven ops)\n246:### Chunk 6P5 \u2014 debugging \u00d76 (all symptom-first; causes never named)\n272:### Chunk 6P6 \u2014 integrations \u00d76 (loopback mock servers, wave-4 I-chunk law)\n300:### Chunk 6P7 \u2014 refactor & feature growth \u00d76 (working code ships)\n324:### Chunk 6P8 \u2014 quality gauntlet \u00d76\n352:### Chunk 6P9 \u2014 capstones \u00d73 (repo-scale; 12\u201318 files each; biggest traces)\n366:### Chunk 6P10 \u2014 syntax, escapes & strict-clean \u00d76 (wave-5 families, PS edition)"
+          },
+          {
+            "role": "tool",
+            "tool_call_id": "call_3",
+            "name": "unknown_tool",
+            "content": "# Wave-6 use-case catalog \u2014 PowerShell for sysadmin work (DRAFT HANDOFF \u2014 main thread owns this)\n\n> **HANDOFF NOTE (2026-07-14, from the second resumed session to the main\n> orchestrator session).** Two user directives were mis-sent to the second\n> session; the user then said, verbatim: \"this work should be in the main\n> agent. give it back to it. I did not mean to tell you. all design work\n> is in the main thread.\" This file is that handback. The main thread owns\n> the design: ADOPT, REWRITE, RENUMBER, OR DELETE this draft freely.\n> The two mis-routed directives, verbatim:\n> 1. \"add 1 more wave - and it needs to cover all aspects covered in the\n>    previous waves for other languages - syntax, debugging, strings,\n>    integrations, etc - we need powershell script creation for sysadmin\n>    work if that's possible\"\n> 2. \"and do you think it would make sense to add a wave of a2ui?\" \u2014\n>    UNANSWERED, left entirely to the main thread.\n> DURABLE FACTS (real regardless of this draft's fate): pwsh 7.6.3 is\n> installed at `~/.local/opt/powershell-7.6.3/` with symlink\n> `~/.local/bin/pwsh` (verified on `bash -lc` PATH \u2192 visible to the batch\n> runner); probes verified 2026-07-14: exit codes + stderr streams behave\n> under `-NoProfile -File`; default `Sort-Object` is culture-linguistic\n> (`'b','A','a','B'` \u2192 `A,a,b,B`); `[ordered]`+`ConvertTo-Json` preserves\n> key order; `Get-Service` absent on Linux pwsh; Pester not installed;\n> `$PSScriptRoot` works. Nothing else was touched: no src/ edits, no\n> SEED_SPEC/PROGRESS edits, no seeds authored for this wave.\n\nStatus: **ADOPTED by the main thread 2026-07-14** (full review: conventions,\nall 10 chunks, and per-seed differentiation checked against the existing\nseed inventory; no collisions \u2014 no ps-* ids exist; 6P10 correctly keeps\nPowerShell out of wave 5's scope; prepare_local.py reference verified\nreal). User directive verbatim above. Feasibility: CONFIRMED \u2014 pwsh 7.6.3\ninstalled user-local on this box (toolchain notes below) and\nprobe-verified 2026-07-14 (exit codes, stderr streams, culture behavior,\nJSON stability, Linux cmdlet surface). Runs after wave 5 unless the user\nreorders; final dataset with waves 4+5+6 \u2248 665 train seeds.\n\nNumbering: waves 1\u20133 = the 240-seed base, wave 4 = the 260-seed catalog in\nflight, wave 5 = the syntax/escapes/build-fixing/warnings catalog (planned\n2026-07-13). \"1 more wave\" therefore lands as wave 6. Wave 5 spans only\nwave-4 languages, so PowerShell syntax/escape coverage lives HERE (chunk\n6P10) \u2014 the aspect matrix stays complete without touching wave 5's scope.\n\nSequencing: authoring may be scheduled anytime after wave-4 chunks drain\n(no toolchain blockers \u2014 pwsh is already installed); trace execution\nfollows the queue order in PROGRESS.md (wave 4 sweep \u2192 wave 5 \u2192 wave 6\nunless the user reorders). One agent per chunk, ~6 seeds, same preamble\n(`tasks/WAVE4_AGENT_PREAMBLE.md`), same gates (smoke via\ngenerate_traces --smoke, full validate, patch round-trip), same ledger\ndiscipline. **57 seeds in 10 chunks, 6P1\u20136P10.**\n\nCoverage mapping to prior waves: syntax/CLI construction (6P1 \u2194 chunks\n13/17/E1), strings (6P2 \u2194 E2 + rust/java string work), data & objects\n(6P3 \u2194 chunks 4/11), filesystem/sysadmin (6P4 \u2194 chunks 5/6/E3), debugging\n(6P5 \u2194 chunks 15/18 + bash debug seeds), integrations (6P6 \u2194 I1\u2013I3),\nrefactoring-under-tests + feature growth (6P7 \u2194 chunk 7 + feature kinds),\nperformance + multi-bug hunts (6P8 \u2194 chunks 8/9), repo-scale/project\ncapstones (6P9 \u2194 chunks 10/12), broken-parse/escapes/warnings (6P10 \u2194\nwave-5 families 5S/5E/5W). Frontend and YAML-DSL aspects stay in their\nwave-4 homes; PowerShell adds nothing there.\n\n## Toolchain (installed 2026-07-14, before this catalog was written)\n\n- PowerShell 7.6.3 linux-x64 tar.gz \u2192 `~/.local/opt/powershell-7.6.3/`,\n  symlinked at `~/.local/bin/pwsh` (first on PATH in login shells; the\n  batch runner uses `bash -lc`, so trace-time teachers see it). This box\n  is ostree-immutable (Bazzite/Kinoite) \u2014 no system layering, user-local\n  only.\n- No Pester anywhere (probe: 0 modules). Harnesses are plain .ps1 assert\n  runners, the exact analog of the wave-4 bash pattern. Zero gallery\n  modules \u2014 wave 6 is hermetic ON PURPOSE; PSGallery/PSResourceGet\n  ecosystem work would be a Part C analog and is explicitly out of scope\n  until the user asks for it.\n\n### Kickoff prerequisites (do at 6P1 green-light \u2014 small, surfaced src edits)\n\n1. `src/generate_traces.py` preflight lang\u2192binary map: add\n   `\"powershell\": \"pwsh\"` (unknown langs currently default to python3,\n   which would skip checking the real toolchain).\n2. `tasks/SEED_SPEC.md` lang list: add `powershell` with verify convention\n   `pwsh -NoProfile -File test_<name>.ps1` (conventions below are the\n   source of truth).\n\n## Per-language conventions \u2014 powershell (binding for every wave-6 seed)\n\n- **lang**: `\"powershell\"`; seed ids prefixed `ps-`; scripts under test\n  are `.ps1` files (`.psm1` + `.psd1` in module-shaped chunks) in the\n  workspace root, run via `pwsh -NoProfile -File` \u2014 executable bit never\n  assumed.\n- **verify_cmd**: exactly `pwsh -NoProfile -File test_<name>.ps1` (ONE\n  command).\n- **Harness law** (plain .ps1, no Pester): `Set-StrictMode -Version\n  Latest`; `$ErrorActionPreference = 'Stop'`; pin BOTH\n  `[System.Globalization.CultureInfo]::CurrentCulture` and\n  `CurrentUICulture` to `InvariantCulture` at the top;\n  `$PSStyle.OutputRendering = 'PlainText'`. Fixtures under\n  `$PSScriptRoot/_t` (never /tmp), recreated per case, removed on exit\n  via try/finally. Missing-script guard first (`Test-Path ./x.ps1` \u2192\n  FAIL line + exit 1) so smoke fails for the right reason. Assert helpers\n  with expected/actual context; failure summary + nonzero exit; success\n  final line exactly `all checks passed (N checks)`.\n- **Child-process capture**: scripts under test run as child processes \u2014\n  `& pwsh -NoProfile -File ./x.ps1 @caseArgs 2>\"$T/err\" > \"$T/out\"` then\n  `$LASTEXITCODE`; compare byte-exact via `Get-Content -Raw`. Pure\n  function libraries may instead be dot-sourced into a CHILD pwsh \u2014 never\n  into the harness's own session without an isolation reason.\n- **Determinism** (probe-grounded): default `Sort-Object` is CULTURE-\n  LINGUISTIC (probe: `'b','A','a','B'` \u2192 `A,a,b,B`) \u2014 any pinned ordering\n  MUST go through `[System.StringComparer]::Ordinal` (e.g.\n  `[Array]::Sort($arr, [System.StringComparer]::Ordinal)`), and the\n  authoring agent proves the pinned order by running it, never by\n  assumption. Banned in contracts: `Get-Random`, wall-clock (`Get-Date`\n  in any output \u2014 \"now\"/cutoffs are ARGUMENTS), `Get-Process`,\n  `Test-Connection`, real network. `Format-Table`/`Format-List`/\n  `Out-String` rendering is width- and version-dependent \u2014 NEVER in a\n  pinned contract; emit data via `ConvertTo-Json`/`ConvertTo-Csv` or\n  hand-rendered strings.\n- **Windows-only surface is OUT OF SCOPE** (verified absent on Linux\n  pwsh: `Get-Service`, registry providers, CIM/WMI, event logs, ACLs,\n  ScheduledTasks). Sysadmin flavor comes from FIXTURES: passwd/group-\n  style files, service-state JSON snapshots, config trees, log\n  directories. A seed may present itself as \"the collector runs\n  elsewhere; you get its snapshot\" \u2014 the honest cross-platform shape.\n- **Cross-platform is a WRITING discipline** (same rule as bash/BSD):\n  `Join-Path` everywhere, no hardcoded `/` or `C:\\`, LF-only output\n  pinned as `` \"`n\" `` (never `[Environment]::NewLine`, which flips to\n  CRLF on Windows), no filesystem case-sensitivity assumptions. Never\n  claim Windows verification \u2014 this box verifies Linux pwsh only.\n- **Encoding**: pwsh 7 defaults to UTF-8 (no BOM) for redirection and\n  `Set-Content`; harnesses pin expectations to that. `-NoNewline` where a\n  contract needs byte-exact tails.\n- **PowerShell-native or it doesn't count**: every seed pins at least one\n  idiom with NO bash/py analog in the wave-4 sibling noted per chunk \u2014\n  objects over text, `param()` metadata, pipeline semantics, splatting,\n  `ShouldProcess`. A PowerShell seed that reads like a transliterated\n  bash seed is a rejected seed.\n- No literal tab characters in any source file (`` \"`t\" `` escapes only);\n  vocabulary hygiene identical to wave 4 (\"awkward real-world names\",\n  never attack/exploit/inject/malicious/bypass/hostile).\n\n## Chunk plan (one agent per chunk, in this order)\n\n### Chunk 6P1 \u2014 core syntax & CLI ergonomics \u00d76\n\n1. build: `[CmdletBinding()]`/`param()` CLI \u2014 typed params,\n   `[ValidateSet()]`, `[ValidatePattern()]`, `[Parameter(Mandatory)]`\n   handled non-interactively (mandatory-miss must ERROR under\n   -NoProfile -File, not prompt), pinned usage text on `-Help` switch,\n   exit contract 0/64/65 (vs bash-subcmd: the pins here are attribute\n   metadata + typed binding, not getopts)\n2. build: subcommand dispatcher \u2014 `init|add|report` via `switch` on\n   `$args[0]` + per-command param splatting from a hashtable; unknown\n   command \u2192 pinned usage, 64\n3. build: switch/flag semantics \u2014 `[switch]` params incl. `-Flag:$false`\n   explicit negation, coercion table pinned, `$PSBoundParameters`\n   introspection report\n4. build: splatting + defaults resolver \u2014 defaults hashtable < config\n   file < explicit args (precedence pinned); emits the RESOLVED\n   invocation as ordinal-sorted `key=value` lines\n5. build: argument-forwarding runner \u2014 invokes a child pwsh script\n   forwarding `@args` faithfully (spaces, empty strings, `-`-leading\n   values preserved); pinned round-trip manifest (bash-argfwd's DEBUG\n   lesson recast as a BUILD spec: PowerShell arrays do not word-split)\n6. debug: parameter-set ambiguity \u2014 two `[Parameter(ParameterSetName=\u2026)]`\n   sets error with \"Parameter set cannot be resolved\" for a documented\n   call shape; symptom-first (the failing invocation is pasted), fix =\n   correct set membership + `DefaultParameterSetName`\n\n### Chunk 6P2 \u2014 strings & text \u00d76\n\n1. build: string toolkit \u2014 trim/pad/truncate-with-ellipsis/title-case via\n   .NET string methods + `-f` format operator only (no regex), invariant-"
+          },
+          {
+            "role": "tool",
+            "tool_call_id": "call_4",
+            "name": "unknown_tool",
+            "content": "src/generate_traces.py:216:                             \"powershell\": \"pwsh\", \"asm\": \"gcc\"}\n~/.local/bin/pwsh\n7.6.3"
+          },
+          {
+            "role": "tool",
+            "tool_call_id": "call_5",
+            "name": "constraints",
+            "content": "49:## Additional authoring constraints (extend SEED_SPEC.md; spec itself unchanged)\n50-\n51-- **Loopback HTTP is allowed and encouraged** for web seeds: go `net/http/\n52-  httptest`, py `wsgiref`/`http.server` on [IP_ADDRESS] ephemeral ports, ts\n53-  `node:http` with `server.listen(0)`. Still hermetic: never a real network.\n54-- **sqlite3 (py stdlib) is allowed** where a real SQL engine serves the task.\n55-- **Refactor seeds** are feature-kind mechanics with category\n56-  `refactor-<family>`: files/ ships a WORKING module whose current tests pass,\n57-  plus new acceptance tests that import the POST-refactor API (new module\n58-  layout / new function signatures) and re-pin the old behavior through it.\n59-  Baseline fails only because the new structure doesn't exist. Prompt = a\n60-  tech-debt ticket; explicitly forbids changing observable behavior.\n61-- **Perf seeds** are build- or feature-kind with category `perf-<family>`.\n62-  Verify gates MUST be deterministic \u2014 never wall-clock assertions:\n63-  - injectable operation counters (comparator calls, probe counts) with exact\n64-    or bounded assertions;\n65-  - go `testing.AllocsPerRun` allocation budgets;\n66-  - py `tracemalloc` peak-memory budgets with generous margins;\n67-  - feasibility gates: input sized so the naive algorithm cannot finish\n68-    inside the verify timeout but the intended one finishes in seconds\n69-    (document the margin in the test comment).\n70-- Repo-scale seeds ship 12\u201318 files in files/ \u2014 the navigation IS the task.\n71-  Debug prompts stay symptom-first; the guilty files are never named.\n72-\n73-## Chunk plan (one agent per chunk, ~6 seeds, in this order)\n74-\n75-### Chunk 1 \u2014 py web/API \u00d76\n76-1. build: WSGI JSON REST resource (\"contacts\") \u2014 routing table, method\n77-   dispatch, 405/404/400 semantics, pagination params, loopback-tested\n78-2. build: request-validation middleware \u2014 schema table per route, typed\n79-   errors as RFC7807-ish JSON bodies, header/query/body sources\n80-3. build: content-negotiation engine \u2014 Accept parsing, q-weights, wildcard\n81-   precedence, 406 fallback policies, vary header computation\n82-4. feature: cookie session store (working) \u2192 add signed cookies (hmac),\n83-   rolling expiry (injectable clock), and concurrent-login session caps\n84-5. build: static file handler \u2014 safe path resolution (traversal rejection),\n85-   Range requests (single range), conditional GET (If-Modified-Since/ETag)\n86-6. debug: form/multipart parser mishandling boundary edge + latin-1/utf-8\n87-   header decode confusion \u2014 uploads \"randomly\" truncate; symptom-first\n88-\n89-### Chunk 2 \u2014 go web/API \u00d76\n90-1. project: REST resource server over httptest \u2014 CRUD + validation +\n91-   optimistic concurrency via ETag/If-Match, storage behind an interface\n92-2. build: handler middleware chain \u2014 context values, short-circuiting,\n93-   panic-to-500 recovery, response-writer wrapping (status capture)\n94-3. build: reverse proxy core \u2014 path prefix stripping, header rewrite rules\n95-   (Host, X-Forwarded-*), hop-by-hop header removal, upstream error mapping\n96-4. build: multipart upload handler \u2014 size limits per part/total, mime\n97-   allowlist, streamed hashing, temp-file cleanup on abort (t.TempDir)\n98-5. feature: JSON API server (working) \u2192 add per-client token-bucket\n99-   rate-limit middleware (injectable clock) + Retry-After + bypass list\n100-6. debug: handler goroutine writing the response after the request context\n101-   is cancelled + body not drained/closed causing connection reuse bugs \u2014\n102-   deterministic via httptest + forced cancellation\n103-\n104-### Chunk 3 \u2014 ts web/API \u00d76\n105-1. project: node:http JSON API (\"bookmarks\") \u2014 router, body-size-limited\n106-   JSON parsing, status semantics, keep-alive-safe error paths, listen(0)\n107-2. build: CORS policy engine (pure logic) \u2014 origin matching (exact/wildcard/\n108-   regex-safe), preflight requirement detection, allow-credentials rules,\n109-   header echo vs allowlist"
+          },
+          {
+            "role": "tool",
+            "tool_call_id": "call_6",
+            "name": "unknown_tool",
+            "content": "{\n  \"id\": \"bash-subcmd\",\n  \"lang\": \"bash\",\n  \"category\": \"build-cli\",\n  \"prompt\": \"Ticket from the platform team. Every on-call shift we jot down what we did to which host in a shared scratch note, and it is chaos \u2014 nobody can tell what happened to web2 last month. I want a tiny per-directory maintenance log driven by one bash script, `maintlog.sh`, in the repo root. Plain bash, and do it the bash way: short options parsed with getopts in silent mode (leading colon \u2014 we control every error message ourselves), and the common long spellings accepted by rewriting them to the short form before getopts runs.\\n\\nStorage: `.maintlog` in the current directory, one entry per line, tab-separated fields: seq, host, tag, message. seq starts at 1 and increments per entry. Fields never contain tabs \u2014 reject any add that would break that.\\n\\nCommands:\\n- `init` \u2014 create an empty `.maintlog` here. stdout: `initialized .maintlog`. If the file already exists: stderr `maintlog: already initialized`, exit 65.\\n- `add -H <host> -m <text> [-t <tag>]` \u2014 append an entry; tag defaults to `-`. stdout: `added #<seq>`. Run before init: stderr `maintlog: not initialized (run 'maintlog.sh init' first)`, exit 65 (this check comes before option parsing). Missing OR empty -H/-m: `maintlog: add: -H and -m are required` + usage, exit 64. Any field containing a tab: `maintlog: fields may not contain tabs`, exit 65.\\n- `report [-H <host>] [-n <count>]` \u2014 print matching entries oldest first, each as `#<seq>` then host, tag, message, tab-separated (i.e. `#` + the stored line). -H filters by exact host match. -n keeps only the last <count> entries of the filtered set (a count larger than the log just means everything). count must be a positive decimal integer; anything else is `maintlog: invalid count: <value>` + usage, exit 64. Before init: same 65 as add. No matches is fine: print nothing, exit 0.\\n\\nLong options: accept `--host=<v>`, `--message=<v>`, `--tag=<v>`, `--limit=<v>`, `--help` by translating to -H/-m/-t/-n/-h ahead of getopts. Any other argument starting with `--` is `maintlog: unknown option: <arg>` + usage, exit 64. Known limitation I am fine with: the rewrite pass looks at every argument after the command word, so option VALUES must not themselves start with `--` (use the short option for those).\\n\\nExit-code contract: 0 ok, 64 usage error, 65 data error. Usage errors print their one-line message and then the usage block, both to stderr. Data errors print only their one-line message to stderr. `-h` or `--help` in place of a command, or `-h` after add/report, prints the usage block to stdout and exits 0. No command at all: `maintlog: missing command` + usage, 64. Unknown command word: `maintlog: unknown command: <word>` + usage, 64. Unknown short option: `maintlog: unknown option: -<x>` + usage, 64. A short option missing its value: `maintlog: option -<x> requires a value` + usage, 64. Trailing non-option junk after add/report options: `maintlog: <command>: unexpected argument: <word>` + usage, 64.\\n\\nThe usage block, byte-exact (the tests compare it verbatim):\\n\\nusage: maintlog.sh <command> [options]\\n\\ncommands:\\n  init                                  create an empty log in this directory\\n  add -H <host> -m <text> [-t <tag>]    append a maintenance entry\\n  report [-H <host>] [-n <count>]       print entries, oldest first\\n\\nlong options: --host=<v>  --message=<v>  --tag=<v>  --limit=<v>  --help\\nexit codes:   0 ok, 64 usage error, 65 data error\\n\\nAcceptance: `bash test_maintlog.sh` from the workspace root must pass unmodified \u2014 do not touch the test file. Keep the script portable (it also runs on the macOS boxes, so no GNU-only flags in anything you shell out to; honestly this should be nearly pure bash anyway).\",\n  \"verify_cmd\": \"bash test_maintlog.sh\",\n  \"test_files\": [\n    \"test_maintlog.sh\"\n  ]\n}\n===\ntest_maintlog.sh\n===\n{\n  \"id\": \"bash-argfwd\",\n  \"lang\": \"bash\",\n  \"category\": \"debug-cli\",\n  \"prompt\": \"Our deploy wrapper mangles anything with a space in it. Today someone finally used a real deploy message:\\n\\n    bash release.sh --message 'hotfix for cart totals' --target web1\\n\\nand the request spool came out as argc=8 with the message broken across three separate fields, so the executor rejected the request as malformed. I ran the deployer directly with the exact same arguments:\\n\\n    bash deploy.sh --message 'hotfix for cart totals' --target web1\\n\\nand that spool is perfect \u2014 argc=4, message intact on one line. So deploy.sh itself is fine; it's the front door.\\n\\nTwo more oddities from this week that I'd bet are the same thing: a teammate passed --include 'notes/*.md' (meant literally \u2014 the deployer treats that field as a pattern spec) and the spool showed two real filenames from his checkout instead of the pattern he typed; and an intentionally blank --note '' just vanishes from the spool entirely, argc says 5 when it should say 6.\\n\\nPlain single-word invocations like `bash release.sh --target web1` have worked for months, which is why nobody caught this earlier.\\n\\nFix release.sh so every field arrives at deploy.sh exactly as typed. `bash test_argfwd.sh` is the regression gate \u2014 leave the tests alone, and don't change the spool format; the executor side depends on it.\",\n  \"verify_cmd\": \"bash test_argfwd.sh\",\n  \"test_files\": [\n    \"test_argfwd.sh\"\n  ]\n}"
+          },
+          {
+            "role": "tool",
+            "tool_call_id": "call_7",
+            "name": "unknown_tool",
+            "content": "#!/usr/bin/env bash\n# Acceptance harness for maintlog.sh.\n# Run from the workspace root:  bash test_maintlog.sh\nset -u\nLC_ALL=C\nexport LC_ALL\nunset CDPATH\n\n# run from the harness's own directory even if invoked from elsewhere\n[[ $0 == */* ]] && cd -- \"${0%/*}\"\n\nROOT=$PWD\nT=_t\nrm -rf \"$T\"\nmkdir -p \"$T\"\ncleanup() { rm -rf \"$ROOT/$T\"; }\ntrap cleanup EXIT\n\nchecks=0\nfails=0\n\nnote_fail() {\n  fails=$((fails + 1))\n  printf 'FAIL %s\\n' \"$1\"\n}\n\nassert_eq() { # assert_eq <label> <expected> <actual>\n  checks=$((checks + 1))\n  if [[ \"$2\" == \"$3\" ]]; then\n    return 0\n  fi\n  fails=$((fails + 1))\n  printf 'FAIL %s\\n--- expected ---\\n%s\\n--- actual ---\\n%s\\n----------------\\n' \"$1\" \"$2\" \"$3\"\n}\n\nassert_true() { # assert_true <label> <rc-of-condition>\n  checks=$((checks + 1))\n  if [[ \"$2\" -eq 0 ]]; then\n    return 0\n  fi\n  fails=$((fails + 1))\n  printf 'FAIL %s\\n' \"$1\"\n}\n\nslurp() { # slurp <var> <file> -- byte-exact file contents into var\n  IFS= read -r -d '' \"$1\" < \"$2\" || true\n}\n\nRC=0\nOUT=''\nERR=''\nrun_in() { # run_in <dir> <cmd...> -- capture RC, OUT, ERR byte-exactly\n  local d=$1\n  shift\n  ( cd \"$d\" && exec \"$@\" ) > \"$ROOT/$T/out\" 2> \"$ROOT/$T/err\"\n  RC=$?\n  slurp OUT \"$ROOT/$T/out\"\n  slurp ERR \"$ROOT/$T/err\"\n}\n\nif [[ ! -f maintlog.sh ]]; then\n  printf 'FAIL maintlog.sh not found in the workspace root\\n'\n  exit 1\nfi\n\nW=\"$T/work\"\nmkdir -p \"$W\"\nmrun() { run_in \"$W\" bash \"$ROOT/maintlog.sh\" \"$@\"; }\n\n# The usage block, byte-exact (also printed after every usage error).\ncat > \"$T/usage\" <<'EOF'\nusage: maintlog.sh <command> [options]\n\ncommands:\n  init                                  create an empty log in this directory\n  add -H <host> -m <text> [-t <tag>]    append a maintenance entry\n  report [-H <host>] [-n <count>]       print entries, oldest first\n\nlong options: --host=<v>  --message=<v>  --tag=<v>  --limit=<v>  --help\nexit codes:   0 ok, 64 usage error, 65 data error\n...\ntasks/seeds/bash-argfwd/:\nfiles\nreference_fix.patch\ntask.json\n\ntasks/seeds/bash-argfwd/files/:\ndeploy.sh\nrelease.sh\ntest_argfwd.sh"
+          },
+          {
+            "role": "tool",
+            "tool_call_id": "call_8",
+            "name": "unknown_tool",
+            "content": ""
+          },
+          {
+            "role": "tool",
+            "tool_call_id": "call_9",
+            "name": "unknown_tool",
+            "content": "--- mandatory miss, stdin /dev/null:\n\ncmdlet m.ps1 at command pipeline position 1\nSupply values for the following parameters:\nName: \nm.ps1: Cannot process command because of one or more missing mandatory parameters: Name.\nexit=1\n--- validateset violation:\nexit=1\nm.ps1: Cannot validate argument on parameter 'Level'. The argument \"bogus\" does not belong to the set \"low,normal,urgent\" specified by the ValidateSet attribute. Supply an argument that is in the set and then try the command again.\n--- unknown param:\nexit=1\nm.ps1: A parameter cannot be found that matches parameter name 'Bogus'.\n--- extra positional:\nexit=1\nm.ps1: Cannot validate argument on parameter 'Level'. The argument \"stray\" does not belong to the set \"low,normal,urgent\" specified by the ValidateSet attribute. Supply an argument that is in the set and then try the command again."
+          },
+          {
+            "role": "tool",
+            "tool_call_id": "call_10",
+            "name": "unknown_tool",
+            "content": "Task #1 created successfully: Probe pwsh behaviors for 6P1 pins"
+          },
+          {
+            "role": "tool",
+            "tool_call_id": "call_11",
+            "name": "unknown_tool",
+            "content": "Task #2 created successfully: Author 6 seeds ps-windowcast, ps-certledger, ps-togglecard, ps-cfgresolve, ps-argrelay, ps-snapquery"
+          },
+          {
+            "role": "tool",
+            "tool_call_id": "call_12",
+            "name": "unknown_tool",
+            "content": "Task #3 created successfully: Self-check gates: smoke, reference patches, re-smoke"
+          },
+          {
+            "role": "tool",
+            "tool_call_id": "call_13",
+            "name": "unknown_tool",
+            "content": "Updated task #1 status"
+          },
+          {
+            "role": "tool",
+            "tool_call_id": "call_14",
+            "name": "unknown_tool",
+            "content": "=== 1. -NonInteractive mandatory miss (stdout/stderr split):\nexit=1\n--stdout:\n--stderr:\nm.ps1: Cannot process command because of one or more missing mandatory parameters: Name.\n=== 2. exit 64 passthrough:\nexit=64\n=== 3. param set ambiguity:\nexit=1\n--stderr:\nps.ps1: Parameter set cannot be resolved using the specified named parameters. One or more parameters issued cannot be used together or an insufficient number of parameters were provided.\nexit2=1\n--stderr2:\nps.ps1: Parameter set cannot be resolved using the specified named parameters. One or more parameters issued cannot be used together or an insufficient number of parameters were provided."
+          },
+          {
+            "role": "assistant",
+            "content": "Clean results: `-NonInteractive` mandatory-miss gives exit 1, empty stdout, one stderr line; parameter-set ambiguity reproduces for both call shapes. Next: switch semantics and `@args` forwarding."
+          },
+          {
+            "role": "assistant",
+            "content": null,
+            "tool_calls": [
+              {
+                "id": "call_15",
+                "type": "function",
+                "function": {
+                  "name": "unknown_tool",
+                  "arguments": "{}"
+                }
+              },
+              {
+                "id": "call_16",
+                "type": "function",
+                "function": {
+                  "name": "unknown_tool",
+                  "arguments": "{}"
+                }
+              },
+              {
+                "id": "call_17",
+                "type": "function",
+                "function": {
+                  "name": "unknown_tool",
+                  "arguments": "{}"
+                }
+              }
+            ]
+          },
+          {
+            "role": "tool",
+            "tool_call_id": "call_15",
+            "name": "unknown_tool",
+            "content": "=== 4. switch semantics:\nDryRun present=True bool=True explicit=True\nColor present=False bool=False explicit=False\nVerify present=False bool=False explicit=False\n=== 5. @args forwarding to child pwsh (no param block):\nargc=6\n[0] 22:hotfix for cart totals\n[1] 0:\n[2] 9:-Verbose2\n[3] 10:notes/*.md\n[4] 13:--target=web1\n[5] 1:-\nrelay exit=7"
+          },
+          {
+            "role": "tool",
+            "tool_call_id": "call_16",
+            "name": "unknown_tool",
+            "content": "=== 6. -Flag:$false literal via -File (single-quoted from bash):\nDryRun present=True bool=True explicit=True\nColor present=False bool=False explicit=True\nVerify present=False bool=False explicit=False\n=== 6b. from a pwsh caller with literal string:\nDryRun present=True bool=True explicit=True\nColor present=False bool=False explicit=True\nVerify present=False bool=False explicit=False\n=== 6c. -Color:false (no dollar):\nDryRun present=False bool=False explicit=False\nColor present=False bool=False explicit=True\nVerify present=False bool=False explicit=False\n=== 7. param() without CmdletBinding, unknown dash args:\nmanifest=out.txt\nargc=3\narg:[-Verbose]\narg:[x y]\narg:[]\n=== 8. ordinal sort:\n-lead,10,2,A,B,Zed,a,alpha,b\n=== 9. ConvertTo-Json ordered:\n{\"zeta\":1,\"Alpha\":\"x\",\"count\":25}\n=== 10. Get-Content -Raw empty file under strict:\nParentContainsErrorRecordException: The property 'Length' cannot be found on this object. Verify that the property exists."
+          },
+          {
+            "role": "tool",
+            "tool_call_id": "call_17",
+            "name": "unknown_tool",
+            "content": "=== 11. ValidatePattern + typed-int + positional messages:\nHELPTEXT\nhelp exit=0\nvp.ps1: Cannot validate argument on parameter 'Service'. The argument \"Bad_Name\" does not match the \"^[a-z][a-z0-9-]{1,31}$\" pattern. Supply an argument that matches \"^[a-z][a-z0-9-]{1,31}$\" and try the command again.\npat exit=0\nvp.ps1: Cannot process argument transformation on parameter 'Minutes'. Cannot convert value \"abc\" to type \"System.Int32\". Error: \"The input string 'abc' was not in a correct format.\"\nvp.ps1: A positional parameter cannot be found that accepts argument 'stray'.\n=== 12. switch-only script stray positional:\nsw.ps1: A positional parameter cannot be found that accepts argument 'extra'.\n=== 13. -ccontains and case-sensitive key check:\ncc=False ci=True\n=== 14. ConvertFrom-Json types:\nGet-Content: Cannot find path 'workspaces/_probe_ps/cfg.json' because it does not exist.\nConvertFrom-Json: Cannot bind argument to parameter 'InputObject' because it is null.\nBatchSize Int64 200\nCompress Boolean True\nFrac Double 2.5\nRegion String eu-1\n=== 15. 3-layer empty-string forwarding:\nargc=5\n[0] 3:a b\n[1] 0:\n[2] 1:-\n[3] 1:0\n[4] 7:  pad  \nexit=1"
+          },
+          {
+            "role": "assistant",
+            "content": "All behaviors are pinned down. Cleaning up the probe scratch and checking a recent seed's `task.json` for the catalog-field precedent, then writing the six seeds."
+          },
+          {
+            "role": "assistant",
+            "content": null,
+            "tool_calls": [
+              {
+                "id": "call_18",
+                "type": "function",
+                "function": {
+                  "name": "unknown_tool",
+                  "arguments": "{}"
+                }
+              },
+              {
+                "id": "call_19",
+                "type": "function",
+                "function": {
+                  "name": "unknown_tool",
+                  "arguments": "{}"
+                }
+              },
+              {
+                "id": "call_20",
+                "type": "function",
+                "function": {
+                  "name": "unknown_tool",
+                  "arguments": "{}"
+                }
+              },
+              {
+                "id": "call_21",
+                "type": "function",
+                "function": {
+                  "name": "unknown_tool",
+                  "arguments": "{}"
+                }
+              }
+            ]
+          },
+          {
+            "role": "tool",
+            "tool_call_id": "call_18",
+            "name": "unknown_tool",
+            "content": "This Bash command contains multiple operations. The following part requires approval: rm -rf workspaces/_probe_ps && python3 -c \"import json; d=json.load(open('tasks/seeds/bash-feedmix/task.json')); print(json.dumps({k:(v if k!='prompt' else v[:80]) for k,v in d.items()}, indent=1))\" && ls workspaces"
+          },
+          {
+            "role": "tool",
+            "tool_call_id": "call_19",
+            "name": "unknown_tool",
+            "content": "Dangerous rm operation detected: 'workspaces/_probe_ps'\n\nThis command would remove a workspace directory (the working directory, an additional working directory, or one of their parent directories). This requires explicit approval and cannot be auto-allowed by permission rules."
+          },
+          {
+            "role": "tool",
+            "tool_call_id": "call_20",
+            "name": "unknown_tool",
+            "content": "bash-argfwd\nbash-dotlink\nbash-dureport"
+          },
+          {
+            "role": "tool",
+            "tool_call_id": "call_21",
+            "name": "unknown_tool",
+            "content": "{\n \"id\": \"bash-feedmix\",\n \"lang\": \"bash\",\n \"category\": \"warnfix-bash\",\n \"prompt\": \"The morning feed-round script is the last one in the barn re\",\n \"verify_cmd\": \"bash test_feedmix.sh\",\n \"test_files\": [\n  \"test_feedmix.sh\"\n ],\n \"notes\": \"5W5 item 5: shellcheck cleanup round 3 \\u2014 arrays + read -r + IFS discipline; SC set distinct from 5W2 #6 (2086/2046/2164) and 5W5 #4 (2155/2181/2115). Planted findings probed at baseline, nothing else at -S style: SC2068 x2 (printf '%s\\\\n' $@ in warn(), print_row ${row[@]}), SC2199 (+ companion SC2076 on the same line \\u2014 the quoted-substring-in-=~ idiom; one loop fix clears both), SC2162 (read without -r). IFS discipline is the fourth lesson: baseline sets IFS=: globally for the chart loop and never restores it, so \\\"${missing[*]}\\\" joins with colons and the unquoted print_row call splits the script's own 'note: ...' element at its colon; the fix is scoping (while IFS=: read -r ...). Every class is behavior-pinned byte-exactly: round A pins the backslash note (SC2162), the note/| layout (SC2068 #2 \\u2014 with default IFS restored the split happens on spaces, with baseline global IFS=: it splits at the note colon; either way the diff fails), the space-joined 'short on:' line (IFS), and the sea-salt/salt exact-membership fix (SC2199: baseline's concatenated =~ substring match claims plain 'salt' is stocked); rounds C/D pin warn() emitting exactly one line (SC2068 #1). Chart is passwd-style colon fields so fields may contain spaces; fixture backslash is mid-string so read cannot line-continue. Domain: stable feed-round prep sheets \\u2014 rb-stallbook is a Ruby stall-booking ledger, csharp-toollend is tool lending; this is a shellcheck warnfix seed on a TSV-ish chart printer, no overlap in defect class or layer. Toolchain observed: ShellCheck 0.11.0, bash 5.x.\",\n \"catalog\": {\n  \"wave\": 5,\n  \"chunk\": \"5W5\",\n  \"index\": 5\n }\n}"
+          },
+          {
+            "role": "assistant",
+            "content": "The `notes` field is the place for probe facts and differentiation. Probing is done \u2014 now authoring all six seeds."
+          },
+          {
+            "role": "assistant",
+            "content": null,
+            "tool_calls": [
+              {
+                "id": "call_22",
+                "type": "function",
+                "function": {
+                  "name": "unknown_tool",
+                  "arguments": "{}"
+                }
+              },
+              {
+                "id": "call_23",
+                "type": "function",
+                "function": {
+                  "name": "unknown_tool",
+                  "arguments": "{}"
+                }
+              },
+              {
+                "id": "call_24",
+                "type": "function",
+                "function": {
+                  "name": "unknown_tool",
+                  "arguments": "{}"
+                }
+              },
+              {
+                "id": "call_25",
+                "type": "function",
+                "function": {
+                  "name": "unknown_tool",
+                  "arguments": "{}"
+                }
+              },
+              {
+                "id": "call_26",
+                "type": "function",
+                "function": {
+                  "name": "unknown_tool",
+                  "arguments": "{}"
+                }
+              }
+            ]
+          },
+          {
+            "role": "tool",
+            "tool_call_id": "call_22",
+            "name": "unknown_tool",
+            "content": "Updated task #1 status"
+          },
+          {
+            "role": "tool",
+            "tool_call_id": "call_23",
+            "name": "unknown_tool",
+            "content": "Updated task #2 status"
+          },
+          {
+            "role": "tool",
+            "tool_call_id": "call_24",
+            "name": "unknown_tool",
+            "content": "Created tasks/seeds/ps-windowcast/files/test_announce.ps1."
+          },
+          {
+            "role": "tool",
+            "tool_call_id": "call_25",
+            "name": "unknown_tool",
+            "content": "Created tasks/seeds/ps-windowcast/files/.gitignore."
+          },
+          {
+            "role": "tool",
+            "tool_call_id": "call_26",
+            "name": "unknown_tool",
+            "content": "Created tasks/seeds/ps-windowcast/task.json."
+          },
+          {
+            "role": "assistant",
+            "content": "**Seed 2: ps-certledger** (catalog item 2 \u2014 subcommand dispatcher with splatting):"
+          },
+          {
+            "role": "assistant",
+            "content": null,
+            "tool_calls": [
+              {
+                "id": "call_27",
+                "type": "function",
+                "function": {
+                  "name": "unknown_tool",
+                  "arguments": "{}"
+                }
+              },
+              {
+                "id": "call_28",
+                "type": "function",
+                "function": {
+                  "name": "unknown_tool",
+                  "arguments": "{}"
+                }
+              },
+              {
+                "id": "call_29",
+                "type": "function",
+                "function": {
+                  "name": "unknown_tool",
+                  "arguments": "{}"
+                }
+              },
+              {
+                "id": "call_30",
+                "type": "function",
+                "function": {
+                  "name": "unknown_tool",
+                  "arguments": "{}"
+                }
+              },
+              {
+                "id": "call_31",
+                "type": "function",
+                "function": {
+                  "name": "unknown_tool",
+                  "arguments": "{}"
+                }
+              },
+              {
+                "id": "call_32",
+                "type": "function",
+                "function": {
+                  "name": "unknown_tool",
+                  "arguments": "{}"
+                }
+              }
+            ]
+          },
+          {
+            "role": "tool",
+            "tool_call_id": "call_27",
+            "name": "unknown_tool",
+            "content": "Created tasks/seeds/ps-certledger/files/test_renew.ps1."
+          },
+          {
+            "role": "tool",
+            "tool_call_id": "call_28",
+            "name": "unknown_tool",
+            "content": "Created tasks/seeds/ps-certledger/files/.gitignore."
+          },
+          {
+            "role": "tool",
+            "tool_call_id": "call_29",
+            "name": "unknown_tool",
+            "content": "Created tasks/seeds/ps-certledger/task.json."
+          },
+          {
+            "role": "tool",
+            "tool_call_id": "call_30",
+            "name": "unknown_tool",
+            "content": "Created tasks/seeds/ps-togglecard/files/test_flagcard.ps1."
+          },
+          {
+            "role": "tool",
+            "tool_call_id": "call_31",
+            "name": "unknown_tool",
+            "content": "Created tasks/seeds/ps-togglecard/files/.gitignore."
+          },
+          {
+            "role": "tool",
+            "tool_call_id": "call_32",
+            "name": "unknown_tool",
+            "content": "Created tasks/seeds/ps-togglecard/task.json."
+          },
+          {
+            "role": "assistant",
+            "content": "**Seed 4: ps-cfgresolve** (catalog item 4 \u2014 splatting + defaults/config/args precedence resolver):"
+          },
+          {
+            "role": "assistant",
+            "content": null,
+            "tool_calls": [
+              {
+                "id": "call_33",
+                "type": "function",
+                "function": {
+                  "name": "unknown_tool",
+                  "arguments": "{}"
+                }
+              },
+              {
+                "id": "call_34",
+                "type": "function",
+                "function": {
+                  "name": "unknown_tool",
+                  "arguments": "{}"
+                }
+              },
+              {
+                "id": "call_35",
+                "type": "function",
+                "function": {
+                  "name": "unknown_tool",
+                  "arguments": "{}"
+                }
+              }
+            ]
+          },
+          {
+            "role": "tool",
+            "tool_call_id": "call_33",
+            "name": "unknown_tool",
+            "content": "Created tasks/seeds/ps-cfgresolve/files/test_effconf.ps1."
+          },
+          {
+            "role": "tool",
+            "tool_call_id": "call_34",
+            "name": "unknown_tool",
+            "content": "Created tasks/seeds/ps-cfgresolve/files/.gitignore."
+          },
+          {
+            "role": "tool",
+            "tool_call_id": "call_35",
+            "name": "unknown_tool",
+            "content": "Created tasks/seeds/ps-cfgresolve/task.json."
+          },
+          {
+            "role": "assistant",
+            "content": "**Seed 5: ps-argrelay** (catalog item 5 \u2014 faithful `@args` forwarding runner):"
+          },
+          {
+            "role": "assistant",
+            "content": null,
+            "tool_calls": [
+              {
+                "id": "call_36",
+                "type": "function",
+                "function": {
+                  "name": "unknown_tool",
+                  "arguments": "{}"
+                }
+              },
+              {
+                "id": "call_37",
+                "type": "function",
+                "function": {
+                  "name": "unknown_tool",
+                  "arguments": "{}"
+                }
+              },
+              {
+                "id": "call_38",
+                "type": "function",
+                "function": {
+                  "name": "unknown_tool",
+                  "arguments": "{}"
+                }
+              },
+              {
+                "id": "call_39",
+                "type": "function",
+                "function": {
+                  "name": "unknown_tool",
+                  "arguments": "{}"
+                }
+              },
+              {
+                "id": "call_40",
+                "type": "function",
+                "function": {
+                  "name": "unknown_tool",
+                  "arguments": "{}"
+                }
+              },
+              {
+                "id": "call_41",
+                "type": "function",
+                "function": {
+                  "name": "unknown_tool",
+                  "arguments": "{}"
+                }
+              },
+              {
+                "id": "call_42",
+                "type": "function",
+                "function": {
+                  "name": "unknown_tool",
+                  "arguments": "{}"
+                }
+              }
+            ]
+          },
+          {
+            "role": "tool",
+            "tool_call_id": "call_36",
+            "name": "unknown_tool",
+            "content": "Created tasks/seeds/ps-argrelay/files/test_relay.ps1."
+          },
+          {
+            "role": "tool",
+            "tool_call_id": "call_37",
+            "name": "unknown_tool",
+            "content": "Created tasks/seeds/ps-argrelay/files/.gitignore."
+          },
+          {
+            "role": "tool",
+            "tool_call_id": "call_38",
+            "name": "unknown_tool",
+            "content": "Created tasks/seeds/ps-argrelay/task.json."
+          },
+          {
+            "role": "tool",
+            "tool_call_id": "call_39",
+            "name": "unknown_tool",
+            "content": "Created tasks/seeds/ps-snapquery/files/svcsnap.ps1."
+          },
+          {
+            "role": "tool",
+            "tool_call_id": "call_40",
+            "name": "unknown_tool",
+            "content": "Created tasks/seeds/ps-snapquery/files/test_svcsnap.ps1."
+          },
+          {
+            "role": "tool",
+            "tool_call_id": "call_41",
+            "name": "unknown_tool",
+            "content": "Created tasks/seeds/ps-snapquery/files/.gitignore."
+          },
+          {
+            "role": "tool",
+            "tool_call_id": "call_42",
+            "name": "unknown_tool",
+            "content": "Created tasks/seeds/ps-snapquery/task.json."
+          },
+          {
+            "role": "assistant",
+            "content": "All six seeds are authored. Now the mandatory self-check \u2014 step 1, smoke (must show verify FAILING on starting workspaces):"
+          },
+          {
+            "role": "assistant",
+            "content": null,
+            "tool_calls": [
+              {
+                "id": "call_43",
+                "type": "function",
+                "function": {
+                  "name": "unknown_tool",
+                  "arguments": "{}"
+                }
+              },
+              {
+                "id": "call_44",
+                "type": "function",
+                "function": {
+                  "name": "unknown_tool",
+                  "arguments": "{}"
+                }
+              },
+              {
+                "id": "call_45",
+                "type": "function",
+                "function": {
+                  "name": "unknown_tool",
+                  "arguments": "{}"
+                }
+              },
+              {
+                "id": "call_46",
+                "type": "function",
+                "function": {
+                  "name": "unknown_tool",
+                  "arguments": "{}"
+                }
+              },
+              {
+                "id": "call_47",
+                "type": "function",
+                "function": {
+                  "name": "unknown_tool",
+                  "arguments": "{}"
+                }
+              },
+              {
+                "id": "call_48",
+                "type": "function",
+                "function": {
+                  "name": "unknown_tool",
+                  "arguments": "{}"
+                }
+              },
+              {
+                "id": "call_49",
+                "type": "function",
+                "function": {
+                  "name": "unknown_tool",
+                  "arguments": "{}"
+                }
+              },
+              {
+                "id": "call_50",
+                "type": "function",
+                "function": {
+                  "name": "unknown_tool",
+                  "arguments": "{}"
+                }
+              },
+              {
+                "id": "call_51",
+                "type": "function",
+                "function": {
+                  "name": "unknown_tool",
+                  "arguments": "{}"
+                }
+              },
+              {
+                "id": "call_52",
+                "type": "function",
+                "function": {
+                  "name": "unknown_tool",
+                  "arguments": "{}"
+                }
+              },
+              {
+                "id": "call_53",
+                "type": "function",
+                "function": {
+                  "name": "unknown_tool",
+                  "arguments": "{}"
+                }
+              }
+            ]
+          },
+          {
+            "role": "tool",
+            "tool_call_id": "call_43",
+            "name": "unknown_tool",
+            "content": "Updated task #2 status"
+          },
+          {
+            "role": "tool",
+            "tool_call_id": "call_44",
+            "name": "unknown_tool",
+            "content": "Updated task #3 status"
+          },
+          {
+            "role": "tool",
+            "tool_call_id": "call_45",
+            "name": "unknown_tool",
+            "content": "[ok  ] ps-argrelay: pre-fix verify fails as expected (FAIL relay.ps1 not found in the workspace root)\n[ok  ] ps-certledger: pre-fix verify fails as expected (FAIL renew.ps1 not found in the workspace root)\n[ok  ] ps-cfgresolve: pre-fix verify fails as expected (FAIL effconf.ps1 not found in the workspace root)\n[ok  ] ps-snapquery: pre-fix verify fails as expected (11 of 27 checks failed)\n[ok  ] ps-togglecard: pre-fix verify fails as expected (FAIL flagcard.ps1 not found in the workspace root)\n[ok  ] ps-windowcast: pre-fix verify fails as expected (FAIL announce.ps1 not found in the workspace root)"
+          },
+          {
+            "role": "tool",
+            "tool_call_id": "call_46",
+            "name": "unknown_tool",
+            "content": "workspaces/ps-snapquery:\nsvcsnap.ps1\ntest_svcsnap.ps1\n\nworkspaces/ps-windowcast:\ntest_announce.ps1"
+          },
+          {
+            "role": "tool",
+            "tool_call_id": "call_47",
+            "name": "unknown_tool",
+            "content": "Created workspaces/ps-windowcast/announce.ps1."
+          },
+          {
+            "role": "tool",
+            "tool_call_id": "call_48",
+            "name": "unknown_tool",
+            "content": "all checks passed (50 checks)\nverify exit=0"
+          },
+          {
+            "role": "tool",
+            "tool_call_id": "call_49",
+            "name": "unknown_tool",
+            "content": "Created workspaces/ps-certledger/renew.ps1."
+          },
+          {
+            "role": "tool",
+            "tool_call_id": "call_50",
+            "name": "unknown_tool",
+            "content": "all checks passed (57 checks)\nverify exit=0"
+          },
+          {
+            "role": "tool",
+            "tool_call_id": "call_51",
+            "name": "unknown_tool",
+            "content": "Created workspaces/ps-togglecard/flagcard.ps1."
+          },
+          {
+            "role": "tool",
+            "tool_call_id": "call_52",
+            "name": "unknown_tool",
+            "content": "Created workspaces/ps-cfgresolve/effconf.ps1."
+          },
+          {
+            "role": "tool",
+            "tool_call_id": "call_53",
+            "name": "unknown_tool",
+            "content": "all checks passed (17 checks)\ntogglecard exit=0\nall checks passed (41 checks)\ncfgresolve exit=0"
+          },
+          {
+            "role": "assistant",
+            "content": "Both pass. Now the argrelay reference and the snapquery fix:"
+          },
+          {
+            "role": "assistant",
+            "content": null,
+            "tool_calls": [
+              {
+                "id": "call_54",
+                "type": "function",
+                "function": {
+                  "name": "unknown_tool",
+                  "arguments": "{}"
+                }
+              },
+              {
+                "id": "call_55",
+                "type": "function",
+                "function": {
+                  "name": "unknown_tool",
+                  "arguments": "{}"
+                }
+              },
+              {
+                "id": "call_56",
+                "type": "function",
+                "function": {
+                  "name": "unknown_tool",
+                  "arguments": "{}"
+                }
+              },
+              {
+                "id": "call_57",
+                "type": "function",
+                "function": {
+                  "name": "unknown_tool",
+                  "arguments": "{}"
+                }
+              },
+              {
+                "id": "call_58",
+                "type": "function",
+                "function": {
+                  "name": "unknown_tool",
+                  "arguments": "{}"
+                }
+              }
+            ]
+          },
+          {
+            "role": "tool",
+            "tool_call_id": "call_54",
+            "name": "unknown_tool",
+            "content": "Created workspaces/ps-argrelay/relay.ps1."
+          },
+          {
+            "role": "tool",
+            "tool_call_id": "call_55",
+            "name": "unknown_tool",
+            "content": "all checks passed (28 checks)\nargrelay exit=0"
+          },
+          {
+            "role": "tool",
+            "tool_call_id": "call_56",
+            "name": "unknown_tool",
+            "content": "# svcsnap.ps1 \u2014 query a service-state snapshot taken by the fleet collector.\n# The collector runs on the monitoring host and drops a JSON array of\n# {name, state, restarts} records; this tool answers questions about one\n# of those snapshot files without anyone having to open it in an editor.\n[CmdletBinding()]\nparam(\n    [Parameter(Mandatory)]\n    [string]$Snapshot,\n\n    [Parameter(Mandatory, ParameterSetName = 'ByName')]\n    [string]$Name,\n\n    [Parameter(ParameterSetName = 'ByName')]\n    [ValidateRange(1, 10000)]\n    [int]$Limit,\n\n    [Parameter(Mandatory, ParameterSetName = 'ByState')]\n    [ValidateSet('failed', 'running', 'stopped')]\n    [string]$State,\n\n    [switch]$CountOnly\n)\n\nSet-StrictMode -Version Latest\n$ErrorActionPreference = 'Stop'"
+          },
+          {
+            "role": "tool",
+            "tool_call_id": "call_57",
+            "name": "unknown_tool",
+            "content": "Updated workspaces/ps-snapquery/svcsnap.ps1."
+          },
+          {
+            "role": "tool",
+            "tool_call_id": "call_58",
+            "name": "unknown_tool",
+            "content": "all checks passed (27 checks)\nsnapquery exit=0"
+          },
+          {
+            "role": "assistant",
+            "content": "All six references pass. Generating the reference patches:"
+          },
+          {
+            "role": "assistant",
+            "content": null,
+            "tool_calls": [
+              {
+                "id": "call_59",
+                "type": "function",
+                "function": {
+                  "name": "unknown_tool",
+                  "arguments": "{}"
+                }
+              },
+              {
+                "id": "call_60",
+                "type": "function",
+                "function": {
+                  "name": "unknown_tool",
+                  "arguments": "{}"
+                }
+              }
+            ]
+          },
+          {
+            "role": "tool",
+            "tool_call_id": "call_59",
+            "name": "unknown_tool",
+            "content": "ps-windowcast: patch lines=114, test-file diffs=0\nps-certledger: patch lines=167, test-file diffs=0\nps-togglecard: patch lines=37, test-file diffs=0\nps-cfgresolve: patch lines=123, test-file diffs=0\nps-argrelay: patch lines=43, test-file diffs=0\nps-snapquery: patch lines=21, test-file diffs=0"
+          },
+          {
+            "role": "tool",
+            "tool_call_id": "call_60",
+            "name": "unknown_tool",
+            "content": "diff --git a/svcsnap.ps1 b/svcsnap.ps1\nindex d9fc528..c1e51c1 100644\n--- a/svcsnap.ps1\n+++ b/svcsnap.ps1\n@@ -2,7 +2,7 @@\n # The collector runs on the monitoring host and drops a JSON array of\n # {name, state, restarts} records; this tool answers questions about one\n # of those snapshot files without anyone having to open it in an editor.\n-[CmdletBinding()]\n+[CmdletBinding(DefaultParameterSetName = 'All')]\n param(\n     [Parameter(Mandatory)]\n     [string]$Snapshot,\n@@ -10,7 +10,6 @@ param(\n     [Parameter(Mandatory, ParameterSetName = 'ByName')]\n     [string]$Name,\n \n-    [Parameter(ParameterSetName = 'ByName')]\n     [ValidateRange(1, 10000)]\n     [int]$Limit,\n \n=== stray files check:\ndiff --git a/announce.ps1 b/announce.ps1\ndiff --git a/renew.ps1 b/renew.ps1\ndiff --git a/flagcard.ps1 b/flagcard.ps1\ndiff --git a/effconf.ps1 b/effconf.ps1\ndiff --git a/relay.ps1 b/relay.ps1\ndiff --git a/svcsnap.ps1 b/svcsnap.ps1"
+          },
+          {
+            "role": "assistant",
+            "content": "Patches are minimal and clean \u2014 each touches exactly one non-test file. Now the determinism check on the buggy tool's failing shapes (5\u00d7 each), then the final re-smoke:"
+          },
+          {
+            "role": "assistant",
+            "content": null,
+            "tool_calls": [
+              {
+                "id": "call_61",
+                "type": "function",
+                "function": {
+                  "name": "unknown_tool",
+                  "arguments": "{}"
+                }
+              }
+            ]
+          },
+          {
+            "role": "tool",
+            "tool_call_id": "call_61",
+            "name": "unknown_tool",
+            "content": "run 1: shape1 rc=1 [svcsnap.ps1: Parameter set cannot be resolved using the spec] shape2 rc=1 [svcsnap.ps1: Parameter set cannot be resolved using the spec]\nrun 2: shape1 rc=1 [svcsnap.ps1: Parameter set cannot be resolved using the spec] shape2 rc=1 [svcsnap.ps1: Parameter set cannot be resolved using the spec]\nrun 3: shape1 rc=1 [svcsnap.ps1: Parameter set cannot be resolved using the spec] shape2 rc=1 [svcsnap.ps1: Parameter set cannot be resolved using the spec]\nrun 4: shape1 rc=1 [svcsnap.ps1: Parameter set cannot be resolved using the spec] shape2 rc=1 [svcsnap.ps1: Parameter set cannot be resolved using the spec]\nrun 5: shape1 rc=1 [svcsnap.ps1: Parameter set cannot be resolved using the spec] shape2 rc=1 [svcsnap.ps1: Parameter set cannot be resolved using the spec]"
+          },
+          {
+            "role": "assistant",
+            "content": "Deterministic 5/5 with the exact error text pasted in the prompt. Final gate \u2014 re-smoke:"
+          },
+          {
+            "role": "assistant",
+            "content": null,
+            "tool_calls": [
+              {
+                "id": "call_62",
+                "type": "function",
+                "function": {
+                  "name": "unknown_tool",
+                  "arguments": "{}"
+                }
+              },
+              {
+                "id": "call_63",
+                "type": "function",
+                "function": {
+                  "name": "unknown_tool",
+                  "arguments": "{}"
+                }
+              },
+              {
+                "id": "call_64",
+                "type": "function",
+                "function": {
+                  "name": "unknown_tool",
+                  "arguments": "{}"
+                }
+              }
+            ]
+          },
+          {
+            "role": "tool",
+            "tool_call_id": "call_62",
+            "name": "unknown_tool",
+            "content": "[ok  ] ps-argrelay: pre-fix verify fails as expected (FAIL relay.ps1 not found in the workspace root)\n[ok  ] ps-certledger: pre-fix verify fails as expected (FAIL renew.ps1 not found in the workspace root)\n[ok  ] ps-cfgresolve: pre-fix verify fails as expected (FAIL effconf.ps1 not found in the workspace root)\n[ok  ] ps-snapquery: pre-fix verify fails as expected (11 of 27 checks failed)\n[ok  ] ps-togglecard: pre-fix verify fails as expected (FAIL flagcard.ps1 not found in the workspace root)\n[ok  ] ps-windowcast: pre-fix verify fails as expected (FAIL announce.ps1 not found in the workspace root)\n=== seed dirs:\ntasks/seeds/ps-argrelay:\nfiles\nreference_fix.patch\ntask.json\n\ntasks/seeds/ps-certledger:\nfiles\nreference_fix.patch\ntask.json\n\ntasks/seeds/ps-cfgresolve:\nfiles\nreference_fix.patch\ntask.json\n\ntasks/seeds/ps-snapquery:\nfiles\nreference_fix.patch\ntask.json\n\ntasks/seeds/ps-togglecard:\nfiles\nreference_fix.patch\ntask.json\n\ntasks/seeds/ps-windowcast:\nfiles\nreference_fix.patch\ntask.json\n=== tab check:\nno literal tabs in any ps seed file"
+          },
+          {
+            "role": "tool",
+            "tool_call_id": "call_63",
+            "name": "unknown_tool",
+            "content": "ps-windowcast build-cli 1 OK\nps-certledger build-cli 2 OK\nps-togglecard build-cli 3 OK\nps-cfgresolve build-config 4 OK\nps-argrelay build-cli 5 OK\nps-snapquery debug-cli 6 OK\n?? tasks/seeds/bash-feedmix/\n?? tasks/seeds/bash-scratchprune/\n?? tasks/seeds/c-chimeplan/\n?? tasks/seeds/c-coldvan/\n?? tasks/seeds/c-snowroute/\n?? tasks/seeds/cpp-fairride/\n?? tasks/seeds/cpp-mortarmix/\n?? tasks/seeds/cpp-quiltgrid/\n?? tasks/seeds/csharp-labelkit/\n?? tasks/seeds/csharp-plotspool/\n?? tasks/seeds/csharp-toollend/\n?? tasks/seeds/java-lookoutlog/\n?? tasks/seeds/java-tramclock/\n?? tasks/seeds/java-woolbale/\n?? tasks/seeds/ts-lockermap/\n?? tasks/seeds/ts-signfleet/\n?? tasks/seeds/ts-skatehire/\n?? tasks/seeds/zsh-frostwatch/\n?? traces/diffs/go-thumbwarm.patch\n?? traces/meta/go-thumbwarm.json\n?? traces/raw/go-thumbwarm.jsonl\n?? traces/raw/go-thumbwarm.stderr\n?? traces/reviews/go-thumbwarm.json"
+          },
+          {
+            "role": "tool",
+            "tool_call_id": "call_64",
+            "name": "unknown_tool",
+            "content": "Updated task #3 status"
+          },
+          {
+            "role": "assistant",
+            "content": "Wave 6, chunk 6P1 complete \u2014 all 6 catalog items authored, all gates green. These are the first PowerShell seeds in the repo (no `ps-*` collisions existed; pwsh 7.6.3 and the `powershell\u2192pwsh` preflight mapping were already in place).\n\n**ps-windowcast** \u2014 build-cli \u2014 `[CmdletBinding()]`/`param()` maintenance-window card CLI: `[Parameter(Mandatory)]` erroring (not prompting) under `-NoProfile -NonInteractive -File`, `[ValidateSet]`/`[ValidatePattern]`/typed-int binding failures pinned at exit 1, `-Help` via its own parameter set, byte-exact usage text, 0/64/65 contract.\nSmoke: `[ok  ] pre-fix verify fails as expected (FAIL announce.ps1 not found in the workspace root)`\nReference verify: `all checks passed (50 checks)`, exit 0.\n\n**ps-certledger** \u2014 build-cli \u2014 `init|add|report` certificate-renewal ledger: `switch` on `$args[0]`, per-command options splatted from a hashtable, JSON store, ordinal report sort, unknown command \u2192 pinned usage + 64.\nSmoke: `[ok  ] pre-fix verify fails as expected (FAIL renew.ps1 not found in the workspace root)`\nReference verify: `all checks passed (57 checks)`, exit 0.\n\n**ps-togglecard** \u2014 build-cli \u2014 `[switch]` semantics audit shim: `-Flag:$false` explicit negation vs omitted default distinguished via `$PSBoundParameters`, value/int coercion columns pinned, engine binding errors for strays.\nSmoke: `[ok  ] pre-fix verify fails as expected (FAIL flagcard.ps1 not found in the workspace root)`\nReference verify: `all checks passed (17 checks)`, exit 0.\n\n**ps-cfgresolve** \u2014 build-config \u2014 defaults hashtable < JSON config < explicit args resolver emitting ordinal-sorted `key=value` lines; explicit-equal-to-default and `-Compress:$false`-beats-config-true pinned; case-sensitive config keys; ordinal-first error reporting.\nSmoke: `[ok  ] pre-fix verify fails as expected (FAIL effconf.ps1 not found in the workspace root)`\nReference verify: `all checks passed (41 checks)`, exit 0.\n\n**ps-argrelay** \u2014 build-cli \u2014 argument-forwarding runner with length-prefixed round-trip manifest: spaces, empty strings (incl. consecutive), `-`-leading values, globs, `0` all forwarded byte-exact through `@args`; child exit-code propagation pinned.\nSmoke: `[ok  ] pre-fix verify fails as expected (FAIL relay.ps1 not found in the workspace root)`\nReference verify: `all checks passed (28 checks)`, exit 0.\n\n**ps-snapquery** \u2014 debug-cli \u2014 parameter-set ambiguity: missing `DefaultParameterSetName` plus `-Limit` stranded in the `ByName` set; two documented call shapes fail with the pasted \"Parameter set cannot be resolved\" error (deterministic 5/5 runs), `-Name`+`-State` exclusivity pinned so the fix can't delete the sets. Reference fix is a 2-line param-block metadata diff.\nSmoke: `[ok  ] pre-fix verify fails as expected (11 of 27 checks failed)`\nReference verify: `all checks passed (27 checks)`, exit 0.\n\nDomain-overlap notes: ps-certledger deliberately diverges from bash-subcmd (getopts + tab-separated flat file) by pinning JSON storage, hashtable splatting, and case-sensitive/ordinal behavior; ps-argrelay recasts bash-argfwd's word-splitting debug lesson as a build spec whose pins are the manifest and exit propagation; ps-cfgresolve differs from go-layered-config/ts-config-merge3/py-config-merge (merge libraries) by pinning `$PSBoundParameters` explicitness at the CLI-binding layer; ps-togglecard has no existing analog (go-flagbind/go-flagengine are Go flag-parsing libraries). All ordinal-sort pins use mixed-case fixtures that the default culture-linguistic `Sort-Object` would order differently, per the wave-6 probe notes."
+          }
+        ],
+        "tools": null
+      },
+      "truncated_cells": []
+    },
+    {
+      "row_idx": 1,
+      "row": {
+        "messages": "[{\"role\":\"system\",\"content\":\"You are an autonomous coding agent running on the user's machine.\\n\\nYo",
+        "tools": null
+      },
+      "truncated_cells": [
+        "messages"
+      ]
+    },
+    {
+      "row_idx": 2,
+      "row": {
+        "messages": "[{\"role\":\"system\",\"content\":\"You are an autonomous coding agent running on the user's machine.\\n\\nYo",
+        "tools": null
+      },
+      "truncated_cells": [
+        "messages"
+      ]
+    },
+    {
+      "row_idx": 3,
+      "row": {
+        "messages": "[{\"role\":\"system\",\"content\":\"You are an autonomous coding agent running on the user's machine.\\n\\nYo",
+        "tools": null
+      },
+      "truncated_cells": [
+        "messages"
+      ]
+    },
+    {
+      "row_idx": 4,
+      "row": {
+        "messages": "[{\"role\":\"system\",\"content\":\"You are an autonomous coding agent running on the user's machine.\\n\\nYo",
+        "tools": null
+      },
+      "truncated_cells": [
+        "messages"
+      ]
+    },
+    {
+      "row_idx": 5,
+      "row": {
+        "messages": "[{\"role\":\"system\",\"content\":\"You are an autonomous coding agent running on the user's machine.\\n\\nYo",
+        "tools": null
+      },
+      "truncated_cells": [
+        "messages"
+      ]
+    },
+    {
+      "row_idx": 6,
+      "row": {
+        "messages": "[{\"role\":\"system\",\"content\":\"You are an autonomous coding agent running on the user's machine.\\n\\nYo",
+        "tools": null
+      },
+      "truncated_cells": [
+        "messages"
+      ]
+    },
+    {
+      "row_idx": 7,
+      "row": {
+        "messages": "[{\"role\":\"system\",\"content\":\"You are an autonomous coding agent running on the user's machine.\\n\\nYo",
+        "tools": null
+      },
+      "truncated_cells": [
+        "messages"
+      ]
+    },
+    {
+      "row_idx": 8,
+      "row": {
+        "messages": "[{\"role\":\"system\",\"content\":\"You are an autonomous coding agent running on the user's machine.\\n\\nYo",
+        "tools": null
+      },
+      "truncated_cells": [
+        "messages"
+      ]
+    },
+    {
+      "row_idx": 9,
+      "row": {
+        "messages": "[{\"role\":\"system\",\"content\":\"You are an autonomous coding agent running on the user's machine.\\n\\nYo",
+        "tools": null
+      },
+      "truncated_cells": [
+        "messages"
+      ]
+    }
+  ],
+  "truncated": true
+}

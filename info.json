@@ -1,0 +1,87 @@
+{
+  "dataset_info": {
+    "default": {
+      "description": "",
+      "citation": "",
+      "homepage": "",
+      "license": "",
+      "features": {
+        "messages": [
+          {
+            "_type": "Json"
+          }
+        ],
+        "tools": [
+          {
+            "type": {
+              "dtype": "string",
+              "_type": "Value"
+            },
+            "function": {
+              "name": {
+                "dtype": "string",
+                "_type": "Value"
+              },
+              "description": {
+                "dtype": "string",
+                "_type": "Value"
+              },
+              "parameters": {
+                "type": {
+                  "dtype": "string",
+                  "_type": "Value"
+                },
+                "properties": {
+                  "_type": "Json"
+                },
+                "required": [
+                  {
+                    "dtype": "string",
+                    "_type": "Value"
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "builder_name": "json",
+      "dataset_name": "fable-5.1-max-reasoning-filtered-10000x",
+      "config_name": "default",
+      "version": {
+        "version_str": "0.0.0",
+        "major": 0,
+        "minor": 0,
+        "patch": 0
+      },
+      "splits": {
+        "train": {
+          "name": "train",
+          "num_bytes": 567207895,
+          "num_examples": 5000,
+          "shard_lengths": [
+            4462,
+            538
+          ],
+          "dataset_name": "fable-5.1-max-reasoning-filtered-10000x"
+        },
+        "full": {
+          "name": "full",
+          "num_bytes": 1984193624,
+          "num_examples": 10000,
+          "shard_lengths": [
+            4066,
+            2222,
+            1671,
+            2041
+          ],
+          "dataset_name": "fable-5.1-max-reasoning-filtered-10000x"
+        }
+      },
+      "dataset_size": 2551401519
+    }
+  },
+  "pending": [],
+  "failed": [],
+  "partial": false
+}

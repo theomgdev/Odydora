@@ -1,0 +1,9 @@
+.hermes/
+Research/
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+ckpt/
+wandb/
+.venv/
+*.egg-info/

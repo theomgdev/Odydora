@@ -162,13 +162,15 @@ def test_tool_calls_are_supervised_and_tool_returns_are_not():
     assert "autonomous coding agent" not in supervised
 
 
-def test_the_default_split_is_the_larger_one():
-    """The card says 10,000 traces; the server reports two splits, train
-    with 5,000 rows and full with 10,000. Defaulting to "train" would train
-    on a third of the corpus and report it as the whole thing.
+def test_the_default_split_is_the_clean_one_not_the_large_one():
+    """`full` has 10,000 rows against `train`'s 5,000 and is unusable:
+    measured over the first ten rows of each, full carries no `tools` at
+    all, 64 of its 65 tool calls degraded to the literal "unknown_tool",
+    and no <thought> content. Training tool choice -- the reasoning this
+    project is about -- is impossible there, so the larger split loses.
     """
     import inspect
 
     from odydora.data import stream_traces
 
-    assert inspect.signature(stream_traces).parameters["split"].default == "full"
+    assert inspect.signature(stream_traces).parameters["split"].default == "train"

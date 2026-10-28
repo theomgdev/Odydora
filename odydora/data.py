@@ -107,7 +107,7 @@ def stream_traces(
     tokenizer,
     chunk,
     dataset="MoreThought/Fable-5.1-Max-Reasoning-Filtered-10000x",
-    split="full",
+    split="train",
     max_tokens=None,
     max_trace_tokens=None,
     skip_traces=0,
@@ -115,16 +115,20 @@ def stream_traces(
 ):
     """Yield (ids, labels, is_trace_start) tensors from the live corpus.
 
-    `split` defaults to "full", not "train". The datasets-server reports two
-    splits for this corpus -- train with 5,000 rows and full with 10,000,
-    15,000 together -- so the conventional default would silently train on a
-    third of the material and call it the corpus.
+    `split` is "train" (5,000 rows) and not "full" (10,000), despite full
+    being larger, because full is corrupted. Measured over the first ten
+    rows of each from the datasets-server: full has `tools` null in 10/10
+    rows, 64 of its 65 tool calls degraded to the literal name
+    "unknown_tool", and no <thought> content at all; train has tools on
+    every row, zero unknown_tool, and reasoning intact. Training the tool
+    choice -- which is the reasoning this project is about -- is impossible
+    on full. The card's "10,000 traces" describes that split, which is why
+    the row count and the quality point in opposite directions.
 
-    Streams by default: the corpus is ~2.55 GB of parquet and a Colab
+    Streams by default: ~2.55 GB of parquet across both splits, and a Colab
     session has no reason to materialize it. `max_trace_tokens` truncates
-    each trace, which is how the fast first-signal stage keeps a 50k-token
-    trace affordable; `skip_traces` is how a resumed run steps over what it
-    already consumed.
+    each trace, which is how the fast first-signal stage keeps a long trace
+    affordable; `skip_traces` steps a resumed run over what it consumed.
     """
     from datasets import load_dataset
 

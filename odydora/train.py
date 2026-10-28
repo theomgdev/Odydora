@@ -72,18 +72,29 @@ def build(
     model_id,
     n,
     layers=None,
-    window=4,
-    use_dora=True,
+    stride=64,
+    mix=0.02,
+    window=0,
+    use_dora=False,
     r=32,
     four_bit=True,
     device_map="auto",
-    attn_implementation="eager",
+    attn_implementation="sdpa",
 ):
     """Load the base model in 4-bit, apply the adapter, attach the core.
 
     Order matters: the adapter wraps the projections first, then the core is
     hooked onto the layer boundaries, so the core sees the adapted hidden
     state rather than the frozen one.
+
+    Defaults follow the measurements rather than the plan they came from.
+    `use_dora=False`: QDoRA must dequantize the frozen 4-bit weight on every
+    forward to take the column norm, which costs 2.0-2.4x training time and
+    is invariant to rank, so DoRA belongs in a late ablation rather than in
+    the first run. `attn_implementation="sdpa"`: FlashAttention-2 needs
+    compute capability >= 8.0 and a T4 is 7.5, while eager wastes memory
+    SDPA does not. `window=0`: intra-chunk detaching measured identical peak
+    memory and only shortens credit assignment.
     """
     from peft import get_peft_model, prepare_model_for_kbit_training
     from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
@@ -114,7 +125,10 @@ def build(
     if four_bit:
         model = prepare_model_for_kbit_training(model, use_gradient_checkpointing=True)
     model = get_peft_model(model, lora_config(use_dora=use_dora, r=r))
-    model = attach_core(model, n=n, layers=layers, window=window, freeze_base=False)
+    model = attach_core(
+        model, n=n, layers=layers, stride=stride, mix=mix, window=window,
+        freeze_base=False,
+    )
     return model, tokenizer
 
 

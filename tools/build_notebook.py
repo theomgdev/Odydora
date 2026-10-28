@@ -11,14 +11,27 @@ import pathlib
 CELLS = []
 
 
+def _lines(text):
+    """Split into nbformat `source` lines, each keeping its trailing newline.
+
+    nbformat says a multiline string is a list whose elements already end in
+    "\\n"; a reader reconstructs the cell with "".join(source). Splitting on
+    "\\n" and dropping the separator therefore renders every markdown cell as
+    one run-together line -- tables collapse, "###" stops being a heading, and
+    stray "~" pairs become strikethrough. Colab shows this; a validator that
+    rejoins with "\\n".join() does not, which is how it shipped once already.
+    """
+    return text.strip("\n").splitlines(keepends=True)
+
+
 def md(text):
-    CELLS.append({"cell_type": "markdown", "metadata": {}, "source": text.strip("\n").split("\n")})
+    CELLS.append({"cell_type": "markdown", "metadata": {}, "source": _lines(text)})
 
 
 def code(text):
     CELLS.append({
         "cell_type": "code", "execution_count": None, "metadata": {},
-        "outputs": [], "source": text.strip("\n").split("\n"),
+        "outputs": [], "source": _lines(text),
     })
 
 
@@ -42,7 +55,7 @@ matters until those move.
 
 | Stage | What it is | Budget | Gate to advance |
 |---|---|---|---|
-| **S1** | first signal, 160 traces truncated to 4k tokens | ~30 min | held-out loss < step-0 loss; `state_norm` finite; `mix` moved |
+| **S1** | first signal, 160 traces truncated to 4k tokens | about 30 min | held-out loss < step-0 loss; `state_norm` finite; `mix` moved |
 | **S2** | long carry, full traces in 1k chunks, Drive-resumed | 2-3 h / session | tail bits/token beats the adapter-only arm at matched parameters |
 | **S3** | push whichever axis S2 names | open | this is where a claim gets written |
 
@@ -65,7 +78,7 @@ absolutes.
   or 28 use it, because `W`, `down` and `up` are all shared.
 - The corpus `train` split is the clean one. `full` has twice the rows and is
   unusable: no `tools`, 64 of 65 tool calls degraded to `"unknown_tool"`.
-- Real trace lengths: median 32,480 tokens, mean 31,822 — the card's "~50,000
+- Real trace lengths: median 32,480 tokens, mean 31,822 — the card's "about 50,000
   average" is the tail. Only **10.1%** of tokens are supervised, so a token
   budget is tokens *seen*, not tokens *learned from*.
 """)
@@ -163,7 +176,7 @@ md("""
 ## 4 — Data
 
 Streams the clean split. The histogram is worth a look: if the median is far
-from ~32k tokens the corpus changed under us.
+from about 32k tokens the corpus changed under us.
 """)
 
 code("""

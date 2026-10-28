@@ -43,3 +43,10 @@ jobs:
         run: |
           python tools/build_notebook.py
           git diff --exit-code --stat notebooks/odydora_colab.ipynb
+
+      - name: Notebook renders the way a reader sees it
+        # Checks the file with "".join(source) semantics, which is what
+        # nbformat specifies and Colab does. A validator that rejoins with
+        # "\n".join() passes a notebook whose every markdown cell has
+        # collapsed into one line -- that shipped once.
+        run: python tools/check_notebook.py

@@ -7,3 +7,4 @@ ckpt/
 wandb/
 .venv/
 *.egg-info/
+tmp/

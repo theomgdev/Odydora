@@ -1,3 +1,5 @@
+import json
+
 import torch
 from transformers import AutoTokenizer
 
@@ -88,3 +90,85 @@ def test_chunks_are_tensors_when_asked():
         assert isinstance(chunk_ids, torch.Tensor)
         assert chunk_ids.shape == chunk_labels.shape
         assert chunk_ids.dim() == 2 and chunk_ids.shape[0] == 1
+
+
+# The real schema, taken from the datasets-server: an assistant turn carries
+# `tool_calls`, a tool return carries `tool_call_id` and `name`.
+AGENTIC_TRACE = [
+    {"role": "system", "content": "You are an autonomous coding agent."},
+    {"role": "user", "content": "Add a seed catalog."},
+    {
+        "role": "assistant",
+        "content": "<thought>\nI will read the specs first.\n</thought>",
+        "tool_calls": [
+            {
+                "id": "call_0",
+                "type": "function",
+                "function": {"name": "read_file", "arguments": '{"path": "spec.md"}'},
+            }
+        ],
+    },
+    {"role": "tool", "content": "SPEC CONTENTS HERE", "tool_call_id": "call_0", "name": "read_file"},
+    {"role": "assistant", "content": "The spec requires three fields."},
+]
+
+
+def test_messages_arriving_as_one_json_string_are_parsed():
+    from odydora.data import normalize_messages
+
+    payload = json.dumps(AGENTIC_TRACE)
+    assert normalize_messages(payload) == AGENTIC_TRACE
+
+
+def test_messages_arriving_split_per_character_are_rejoined():
+    """The datasets-server returned rows whose `messages` was a sequence of
+    one-character strings -- a serialized list iterated before parsing.
+    Treating those as turns would corrupt every mask without raising.
+    """
+    from odydora.data import normalize_messages
+
+    shredded = list(json.dumps(AGENTIC_TRACE))
+    assert normalize_messages(shredded) == AGENTIC_TRACE
+
+
+def test_a_message_that_is_not_a_dict_raises_instead_of_corrupting():
+    from odydora.data import normalize_messages
+
+    try:
+        normalize_messages([{"role": "user", "content": "hi"}, 42])
+    except ValueError as error:
+        assert "not a dict" in str(error)
+        return
+    raise AssertionError("a non-dict turn must raise, not pass silently")
+
+
+def test_tool_calls_are_supervised_and_tool_returns_are_not():
+    tok = tokenizer()
+    # A template that renders tool_calls, as the real Qwen template does.
+    tok.chat_template = (
+        "{% for m in messages %}<|im_start|>{{ m['role'] }}\n{{ m['content'] }}"
+        "{% if m.get('tool_calls') %}{% for c in m['tool_calls'] %}"
+        "<tool_call>{{ c['function']['name'] }} {{ c['function']['arguments'] }}"
+        "</tool_call>{% endfor %}{% endif %}<|im_end|>\n{% endfor %}"
+    )
+    ids, labels = mask_assistant_turns(AGENTIC_TRACE, tok)
+    supervised = tok.decode([i for i, m in zip(ids, labels) if m != -100])
+    # Choosing the tool and its arguments is the reasoning we are training.
+    assert "read_file" in supervised
+    assert "spec.md" in supervised
+    assert "three fields" in supervised
+    # The environment talking back is never a training target.
+    assert "SPEC CONTENTS HERE" not in supervised
+    assert "autonomous coding agent" not in supervised
+
+
+def test_the_default_split_is_the_larger_one():
+    """The card says 10,000 traces; the server reports two splits, train
+    with 5,000 rows and full with 10,000. Defaulting to "train" would train
+    on a third of the corpus and report it as the whole thing.
+    """
+    import inspect
+
+    from odydora.data import stream_traces
+
+    assert inspect.signature(stream_traces).parameters["split"].default == "full"

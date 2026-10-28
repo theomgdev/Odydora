@@ -26,13 +26,14 @@ def normalize_messages(messages):
     """
     if isinstance(messages, str):
         messages = json.loads(messages)
-    elif isinstance(messages, (list, tuple)) and messages:
-        if all(isinstance(m, str) for m in messages):
-            joined = "".join(messages)
-            try:
-                messages = json.loads(joined)
-            except json.JSONDecodeError:
-                messages = [json.loads(m) for m in messages]
+    elif isinstance(messages, list | tuple) and messages and all(
+        isinstance(m, str) for m in messages
+    ):
+        joined = "".join(messages)
+        try:
+            messages = json.loads(joined)
+        except json.JSONDecodeError:
+            messages = [json.loads(m) for m in messages]
     if not isinstance(messages, list):
         raise ValueError(f"messages must be a list, got {type(messages).__name__}")
     bad = [i for i, m in enumerate(messages) if not isinstance(m, dict)]

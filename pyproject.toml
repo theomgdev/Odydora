@@ -1,0 +1,61 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "odydora"
+version = "0.1.0"
+description = "A shared cross-layer recurrent core as a parameter-efficient adapter for frozen 4-bit language models"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+authors = [{ name = "Cahit Karahan", email = "cksoftwaresystems@gmail.com" }]
+keywords = ["peft", "lora", "dora", "recurrence", "long-context", "qlora"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Science/Research",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+  "torch>=2.4",
+  "transformers>=4.46,<5",
+  "peft>=0.13",
+  "datasets>=4.8",
+  "accelerate>=1.0",
+]
+
+[project.optional-dependencies]
+# bitsandbytes is the 4-bit path and is Linux/Windows-CUDA only, so it stays
+# out of the base install: the library and its tests run without it.
+quant = ["bitsandbytes>=0.45"]
+dev = ["pytest>=8.0", "ruff>=0.6"]
+
+[project.urls]
+Homepage = "https://github.com/theomgdev/Odydora"
+Issues = "https://github.com/theomgdev/Odydora/issues"
+
+[tool.setuptools.packages.find]
+include = ["odydora*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+# tmp/ holds throwaway probes and Research/ holds agent briefings; neither ships.
+extend-exclude = ["tmp", "Research", "notebooks"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+ignore = ["B008"]
+
+[tool.ruff.lint.per-file-ignores]
+# The generator embeds notebook source as string literals; wrapping those to
+# 100 columns would change the cells a user reads.
+"tools/build_notebook.py" = ["E501"]

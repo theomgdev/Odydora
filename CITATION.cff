@@ -1,0 +1,11 @@
+cff-version: 1.2.0
+message: If you use this software, please cite it as below.
+title: "Odydora: a shared cross-layer recurrent core as a parameter-efficient adapter"
+authors:
+  - family-names: Karahan
+    given-names: Cahit
+    orcid: ""
+repository-code: "https://github.com/theomgdev/Odydora"
+license: MIT
+version: 0.1.0
+date-released: "2026-10-29"

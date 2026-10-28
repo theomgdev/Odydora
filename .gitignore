@@ -1,10 +1,33 @@
+# Virtual environments (any suffix: .venv, .venv-gpu, .venv-cpu ...)
+.venv*/
+venv*/
+env/
+
+# Agent and editor scratch
 .hermes/
+.claude/
+.cursor/
+.vscode/
+.idea/
+
+# Local research traces: findings stay local, public history stays clean
 Research/
+
+# Scratch probes, never library code
+tmp/
+
+# Python
 __pycache__/
-*.pyc
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+
+# Notebooks and runs
 .ipynb_checkpoints/
 ckpt/
 wandb/
-.venv/
-*.egg-info/
-tmp/
+runs/
+*.log

@@ -48,7 +48,7 @@ def test_only_assistant_content_is_supervised():
     assert any(x != -100 for x in labels), "nothing supervised"
     assert any(x == -100 for x in labels), "everything supervised"
 
-    supervised = tok.decode([i for i, m in zip(ids, labels) if m != -100])
+    supervised = tok.decode([i for i, m in zip(ids, labels, strict=False) if m != -100])
     assert "import was missing" in supervised
     assert "read the file first" in supervised
     # The two things that must never be trained on.
@@ -59,7 +59,7 @@ def test_only_assistant_content_is_supervised():
 def test_supervised_label_equals_the_token_it_predicts():
     tok = tokenizer()
     ids, labels = mask_assistant_turns(TRACE["messages"], tok)
-    for i, m in zip(ids, labels):
+    for i, m in zip(ids, labels, strict=False):
         assert m == -100 or m == i, "labels must be the ids, masked in place"
 
 
@@ -75,7 +75,6 @@ def test_chunking_covers_the_trace_once_and_flags_the_start():
 
 
 def test_a_chunk_with_no_supervised_token_is_dropped():
-    tok = tokenizer()
     ids = list(range(20))
     labels = [-100] * 12 + ids[12:]
     chunks = list(chunk_trace(ids, labels, chunk=6, drop_unsupervised=True))
@@ -108,7 +107,12 @@ AGENTIC_TRACE = [
             }
         ],
     },
-    {"role": "tool", "content": "SPEC CONTENTS HERE", "tool_call_id": "call_0", "name": "read_file"},
+    {
+        "role": "tool",
+        "content": "SPEC CONTENTS HERE",
+        "tool_call_id": "call_0",
+        "name": "read_file",
+    },
     {"role": "assistant", "content": "The spec requires three fields."},
 ]
 
@@ -152,7 +156,7 @@ def test_tool_calls_are_supervised_and_tool_returns_are_not():
         "</tool_call>{% endfor %}{% endif %}<|im_end|>\n{% endfor %}"
     )
     ids, labels = mask_assistant_turns(AGENTIC_TRACE, tok)
-    supervised = tok.decode([i for i, m in zip(ids, labels) if m != -100])
+    supervised = tok.decode([i for i, m in zip(ids, labels, strict=False) if m != -100])
     # Choosing the tool and its arguments is the reasoning we are training.
     assert "read_file" in supervised
     assert "spec.md" in supervised

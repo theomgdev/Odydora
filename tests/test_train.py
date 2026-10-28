@@ -42,16 +42,17 @@ def test_dora_is_requested_and_lora_is_the_fallback():
 
 
 def test_parameter_count_splits_adapter_from_core_and_excludes_the_diagonal():
-    model = attach_core(tiny_qwen(), n=16, layers=(0, 1), window=4)
+    model = attach_core(tiny_qwen(), n=16, layers=(0, 1), stride=4)
     adapter, core = count_parameters(model)
     assert adapter == 0, "no adapter applied yet"
     # W minus its diagonal, down, up, the RMSNorm gain.
-    expected = (16 * 16 - 16) + 16 * 32 + 32 * 16 + 16
+    # W minus diagonal, down, up, RMSNorm gain, and the mixing logit.
+    expected = (16 * 16 - 16) + 16 * 32 + 32 * 16 + 16 + 1
     assert core == expected, f"core count {core} != {expected}"
 
 
 def test_matched_rank_finds_a_rank_within_tolerance():
-    model = attach_core(tiny_qwen(), n=16, layers=(0, 1), window=4)
+    model = attach_core(tiny_qwen(), n=16, layers=(0, 1), stride=4)
     _, core = count_parameters(model)
     rank, got = matched_rank(tiny_qwen, core, use_dora=True)
     assert rank >= 1
@@ -60,7 +61,7 @@ def test_matched_rank_finds_a_rank_within_tolerance():
 
 def test_training_moves_the_core_and_the_loss():
     torch.manual_seed(1)
-    model = attach_core(tiny_qwen(), n=16, layers=(0, 1), window=4)
+    model = attach_core(tiny_qwen(), n=16, layers=(0, 1), stride=4)
     core = model.odydora_core
     before = core.W.detach().clone()
     opt = torch.optim.AdamW([p for p in model.parameters() if p.requires_grad], lr=0.05)
@@ -75,7 +76,7 @@ def test_training_moves_the_core_and_the_loss():
 
 def test_state_resets_on_a_trace_start_and_carries_otherwise():
     torch.manual_seed(2)
-    model = attach_core(tiny_qwen(), n=16, layers=(0, 1), window=4)
+    model = attach_core(tiny_qwen(), n=16, layers=(0, 1), stride=4)
     opt = torch.optim.SGD([p for p in model.parameters() if p.requires_grad], lr=0.0)
     seen = []
     train_steps(model, batches(count=4), opt, log_every=1,
@@ -88,11 +89,11 @@ def test_state_resets_on_a_trace_start_and_carries_otherwise():
 
 def test_checkpoint_round_trips_weights_and_the_corpus_cursor(tmp_path):
     torch.manual_seed(3)
-    model = attach_core(tiny_qwen(), n=16, layers=(0, 1), window=4)
+    model = attach_core(tiny_qwen(), n=16, layers=(0, 1), stride=4)
     model.odydora_core.W.data.add_(0.123)
     path = tmp_path / "ckpt.pt"
     save(model, path, step=17, traces=5, tokens=4096)
-    fresh = attach_core(tiny_qwen(), n=16, layers=(0, 1), window=4)
+    fresh = attach_core(tiny_qwen(), n=16, layers=(0, 1), stride=4)
     meta = restore(fresh, path)
     assert meta["step"] == 17 and meta["traces"] == 5 and meta["tokens"] == 4096
     assert torch.allclose(fresh.odydora_core.W, model.odydora_core.W)

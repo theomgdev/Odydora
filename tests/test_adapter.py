@@ -37,7 +37,7 @@ def cores_of(model):
 def test_one_core_is_shared_and_trained():
     for build in (tiny_gpt2, tiny_qwen):
         torch.manual_seed(0)
-        model = attach_core(build(), n=16, layers=(0, 1), window=4)
+        model = attach_core(build(), n=16, layers=(0, 1), stride=4)
         ids = torch.randint(0, 128, (2, 24))
         model.odydora_reset_state()
         model(input_ids=ids, labels=ids).loss.backward()
@@ -69,7 +69,7 @@ def test_zero_gate_leaves_the_base_model_untouched():
         ids = torch.randint(0, 128, (1, 16))
         with torch.no_grad():
             before = base(input_ids=ids).logits
-        model = attach_core(base, n=16, layers=(0, 1), window=4).eval()
+        model = attach_core(base, n=16, layers=(0, 1), stride=4).eval()
         with torch.no_grad():
             after = model(input_ids=ids).logits
         assert torch.equal(before, after), f"{build.__name__}: core is not identity"
@@ -77,7 +77,7 @@ def test_zero_gate_leaves_the_base_model_untouched():
 
 def test_state_carries_across_calls_and_resets_on_demand():
     torch.manual_seed(2)
-    model = attach_core(tiny_qwen(), n=16, layers=(0, 1), window=4).eval()
+    model = attach_core(tiny_qwen(), n=16, layers=(0, 1), stride=4).eval()
     ids = torch.randint(0, 128, (1, 12))
     model.odydora_reset_state()
     with torch.no_grad():
@@ -91,7 +91,7 @@ def test_state_carries_across_calls_and_resets_on_demand():
 
 def test_carried_state_is_detached_so_chunks_do_not_grow_the_graph():
     torch.manual_seed(3)
-    model = attach_core(tiny_qwen(), n=16, layers=(0, 1), window=4)
+    model = attach_core(tiny_qwen(), n=16, layers=(0, 1), stride=4)
     ids = torch.randint(0, 128, (1, 12))
     model.odydora_reset_state()
     model(input_ids=ids, labels=ids).loss.backward()

@@ -71,7 +71,7 @@ def _make_hook(core, carry, index):
     return hook
 
 
-def attach_core(model, n, layers=None, window=4, freeze_base=True):
+def attach_core(model, n, layers=None, stride=64, mix=0.02, window=0, freeze_base=True):
     """Attach one shared RecurrentCore at each layer boundary in `layers`.
 
     `layers` defaults to every decoder block. `freeze_base=True` freezes the
@@ -91,7 +91,7 @@ def attach_core(model, n, layers=None, window=4, freeze_base=True):
         model.requires_grad_(False)
 
     reference = next(model.parameters())
-    core = RecurrentCore(n=n, width=width, window=window).to(
+    core = RecurrentCore(n=n, width=width, stride=stride, mix=mix, window=window).to(
         device=reference.device, dtype=reference.dtype
     )
     carry = _Carry(indices)

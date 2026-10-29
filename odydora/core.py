@@ -105,16 +105,31 @@ class RecurrentCore(nn.Module):
         recurrence instead of restarting it.
         """
         batch, time, _ = x.shape
+        s = x.new_zeros(batch, self.n) if state is None else state
+        a = self.mix.to(x.dtype)
+
+        if time <= self.stride:
+            pooled = x.squeeze(1) if time == 1 else x.mean(dim=1)
+            s = (1 - a) * s + a * self.norm(self.down(pooled) + s @ self.W)
+            delta = self.up(s).unsqueeze(1)
+            if self.window == 1:
+                s = s.detach()
+            return (delta if time == 1 else delta.expand(batch, time, -1)), s
+
         segments = (time + self.stride - 1) // self.stride
         padding = segments * self.stride - time
 
-        # Mean-pool each segment in one batched op, then one batched `down`.
-        pooled = x if padding == 0 else nn.functional.pad(x, (0, 0, 0, padding))
-        pooled = pooled.view(batch, segments, self.stride, -1).mean(2)
+        # Mean-pool each segment by its true token count so a ragged tail is not
+        # diluted by zero-padding before `down`.
+        if padding == 0:
+            pooled = x.view(batch, segments, self.stride, -1).mean(2)
+        else:
+            split = (segments - 1) * self.stride
+            head = x[:, :split].view(batch, segments - 1, self.stride, -1).mean(2)
+            tail = x[:, split:].mean(dim=1, keepdim=True)
+            pooled = torch.cat([head, tail], dim=1)
         projected = self.down(pooled)
 
-        s = x.new_zeros(batch, self.n) if state is None else state
-        a = self.mix.to(projected.dtype)
         states = []
         for i in range(segments):
             s = (1 - a) * s + a * self.norm(projected[:, i] + s @ self.W)

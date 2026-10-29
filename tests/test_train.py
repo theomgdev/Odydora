@@ -155,6 +155,7 @@ def test_package_root_exports_public_api():
         "attach_core",
         "build",
         "configure_optimizer",
+        "inspect_checkpoint",
         "train_steps",
         "evaluate",
         "save",
@@ -162,3 +163,39 @@ def test_package_root_exports_public_api():
         "without_odydora",
     ):
         assert hasattr(odydora, symbol), f"odydora.{symbol} missing from top-level package"
+
+
+def test_inspect_checkpoint_infers_architecture_without_building_model(tmp_path):
+    from peft import get_peft_model
+
+    from odydora.train import inspect_checkpoint
+
+    wrapped = get_peft_model(
+        tiny_qwen(), lora_config(use_dora=True, r=8, targets=("q_proj", "v_proj"))
+    )
+    model = attach_core(wrapped, n=16, stride=4, freeze_base=False)
+    adapter_p, core_p = count_parameters(model)
+
+    path = tmp_path / "arch.pt"
+    save(model, path, step=42, traces=3, tokens=1024)
+    info = inspect_checkpoint(path)
+    assert info["n"] == 16
+    assert info["r"] == 8
+    assert info["use_dora"] is True
+    assert info["trainable_params"] == adapter_p + core_p
+    assert info["step"] == 42 and info["traces"] == 3 and info["tokens"] == 1024
+
+    # Loading an N=16 checkpoint into an N=0 control model raises a clear ValueError
+    wrong_model = attach_core(
+        get_peft_model(
+            tiny_qwen(), lora_config(use_dora=True, r=8, targets=("q_proj", "v_proj"))
+        ),
+        n=0,
+        freeze_base=False,
+    )
+    try:
+        restore(wrong_model, path)
+    except ValueError as exc:
+        assert "N=16" in str(exc) and "N=0" in str(exc)
+        return
+    raise AssertionError("mismatched core architecture should raise ValueError")

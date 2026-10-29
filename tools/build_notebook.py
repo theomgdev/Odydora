@@ -361,7 +361,9 @@ if action == "List Checkpoints":
     else:
         if active_name:
             print(f"Active config checkpoint: {active_name}\\n")
-        print(f"{\"Status\":<9} {\"Filename\":<36} {\"Size\":>9}   {\"Last Modified\":<19} {\"Step\":>6} {\"Traces\":>8} {\"Tokens\":>10}")
+        print("{:<9} {:<36} {:>9}   {:<19} {:>6} {:>8} {:>10}".format(
+            "Status", "Filename", "Size", "Last Modified", "Step", "Traces", "Tokens"
+        ))
         print("-" * 105)
         for f in files:
             bn = os.path.basename(f)

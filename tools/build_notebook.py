@@ -483,6 +483,7 @@ code("""
 
 user_message = "Explain why carrying a recurrent state across chunk boundaries beats standard LoRA."  # @param {type:"string"}
 system_prompt = "You are an autonomous AI coding and reasoning assistant."  # @param {type:"string"}
+compare_without_odydora = False  # @param {type:"boolean"}
 max_new_tokens = 512  # @param {type:"slider", min:64, max:2048, step:64}
 temperature = 0.7  # @param {type:"slider", min:0.0, max:1.5, step:0.05}
 top_p = 0.9  # @param {type:"slider", min:0.1, max:1.0, step:0.05}
@@ -522,7 +523,7 @@ device = next(model.parameters()).device
 inputs = tok(prompt_text, return_tensors="pt").to(device)
 
 print(f"User:\\n{user_message}\\n")
-print("Odydora:")
+print("Odydora (Recurrent Core):")
 
 streamer = TextStreamer(tok, skip_prompt=True)
 model.eval()
@@ -541,6 +542,22 @@ with torch.no_grad():
 
 new_tokens = output_ids[0][inputs["input_ids"].shape[1]:]
 assistant_reply = tok.decode(new_tokens, skip_special_tokens=True).strip()
+
+if compare_without_odydora:
+    print("\\n" + "─" * 60)
+    print("Without Odydora (Base Network / Recurrence Bypassed):")
+    streamer_base = TextStreamer(tok, skip_prompt=True)
+    with torch.no_grad(), model.without_odydora():
+        model.generate(
+            **inputs,
+            max_new_tokens=max_new_tokens,
+            temperature=temperature if temperature > 0 else None,
+            top_p=top_p if temperature > 0 else None,
+            do_sample=temperature > 0,
+            pad_token_id=tok.pad_token_id,
+            eos_token_id=tok.eos_token_id,
+            streamer=streamer_base,
+        )
 
 CHAT_HISTORY.append({"role": "user", "content": user_message})
 CHAT_HISTORY.append({"role": "assistant", "content": assistant_reply})

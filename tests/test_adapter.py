@@ -184,3 +184,32 @@ def test_attach_core_with_zero_n_is_noop_control_arm():
     loss = model(input_ids=ids, labels=ids).loss
     loss.backward()
     assert loss.item() > 0
+
+
+def test_without_odydora_bypasses_core_and_adapter():
+    """without_odydora() returns host output without core delta or adapter."""
+    from peft import LoraConfig, get_peft_model
+
+    from odydora.adapter import without_odydora
+
+    wrapped = get_peft_model(
+        tiny_qwen(),
+        LoraConfig(r=4, target_modules=["q_proj"], task_type="CAUSAL_LM"),
+    )
+    model = attach_core(wrapped, n=16, stride=4, freeze_base=False)
+    # Give core a non-zero up projection so delta > 0
+    model.odydora_core.up.weight.data.fill_(0.5)
+    model.eval()
+
+    ids = torch.randint(0, 128, (1, 16))
+    out_with = model(ids).logits
+
+    with without_odydora(model):
+        out_without = model(ids).logits
+
+    # With core enabled vs without should differ
+    diff = (out_with - out_without).abs().max().item()
+    assert diff > 1e-5
+
+    # Core enabled status is restored after context
+    assert model.odydora_core.enabled is True

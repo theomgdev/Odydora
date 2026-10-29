@@ -9,6 +9,8 @@ no matter how many layers use it; the per-layer state lives here rather
 than in the core, which keeps the core stateless and therefore shareable.
 """
 
+from contextlib import contextmanager, nullcontext
+
 from torch import nn
 
 from .core import RecurrentCore
@@ -76,6 +78,8 @@ class _Carry:
 
 def _make_hook(core, carry, index):
     def hook(_module, _args, output):
+        if getattr(core, "enabled", True) is False:
+            return output
         hidden = output[0] if isinstance(output, tuple) else output
         delta, state = core(hidden, carry.state.get(index))
         # Detached so a later chunk reads history without backpropagating
@@ -97,7 +101,7 @@ def attach_core(model, n, layers=None, stride=64, mix=0.02, window=0, freeze_bas
     host model, leaving only the core (plus any adapter applied separately)
     trainable. Returns the same model object, carrying `odydora_core`,
     `odydora_layers`, `odydora_reset_state()`, `odydora_detach_state()`,
-    `odydora_state()` and `odydora_calls()`.
+    `odydora_state()`, `odydora_calls()`, `odydora_bypass()` and `without_odydora()`.
 
     `n=0` or `n=None` creates an adapter-only control arm: no hooks are registered,
     core parameter count is 0, and the recurrent lifecycle methods become no-ops.
@@ -110,6 +114,8 @@ def attach_core(model, n, layers=None, stride=64, mix=0.02, window=0, freeze_bas
         model.odydora_detach_state = lambda: None
         model.odydora_state = lambda: {}
         model.odydora_calls = lambda: 0
+        model.odydora_bypass = lambda: nullcontext()
+        model.without_odydora = lambda: without_odydora(model)
         if freeze_base:
             model.requires_grad_(False)
         return model
@@ -142,7 +148,43 @@ def attach_core(model, n, layers=None, stride=64, mix=0.02, window=0, freeze_bas
     model.odydora_detach_state = carry.detach
     model.odydora_state = lambda: dict(carry.state)
     model.odydora_calls = lambda: carry.calls
+    model.odydora_bypass = lambda: bypass_core(model)
+    model.without_odydora = lambda: without_odydora(model)
     return model
+
+
+@contextmanager
+def bypass_core(model):
+    """Temporarily bypass the RecurrentCore without unregistering forward hooks."""
+    core = getattr(model, "odydora_core", None)
+    if core is None:
+        yield
+        return
+    prev = getattr(core, "enabled", True)
+    core.enabled = False
+    try:
+        yield
+    finally:
+        core.enabled = prev
+
+
+@contextmanager
+def without_odydora(model):
+    """Temporarily disable both the RecurrentCore and any attached adapter."""
+    core = getattr(model, "odydora_core", None)
+    prev = getattr(core, "enabled", True) if core is not None else None
+    if core is not None:
+        core.enabled = False
+    has_peft = hasattr(model, "disable_adapter")
+    try:
+        if has_peft:
+            with model.disable_adapter():
+                yield
+        else:
+            yield
+    finally:
+        if core is not None:
+            core.enabled = prev
 
 
 def detach_core(model):

@@ -484,7 +484,8 @@ code("""
 user_message = "Explain why carrying a recurrent state across chunk boundaries beats standard LoRA."  # @param {type:"string"}
 system_prompt = "You are an autonomous AI coding and reasoning assistant."  # @param {type:"string"}
 compare_without_odydora = False  # @param {type:"boolean"}
-max_new_tokens = 512  # @param {type:"slider", min:64, max:2048, step:64}
+unlimited_tokens = True  # @param {type:"boolean"}
+max_new_tokens = 512  # @param {type:"slider", min:64, max:4096, step:64}
 temperature = 0.7  # @param {type:"slider", min:0.0, max:1.5, step:0.05}
 top_p = 0.9  # @param {type:"slider", min:0.1, max:1.0, step:0.05}
 clear_history = False  # @param {type:"boolean"}
@@ -522,6 +523,8 @@ prompt_text = tok.apply_chat_template(messages, tokenize=False, add_generation_p
 device = next(model.parameters()).device
 inputs = tok(prompt_text, return_tensors="pt").to(device)
 
+gen_limit = 4096 if unlimited_tokens else max_new_tokens
+
 print(f"User:\\n{user_message}\\n")
 print("Odydora (Recurrent Core):")
 
@@ -531,7 +534,7 @@ model.eval()
 with torch.no_grad():
     output_ids = model.generate(
         **inputs,
-        max_new_tokens=max_new_tokens,
+        max_new_tokens=gen_limit,
         temperature=temperature if temperature > 0 else None,
         top_p=top_p if temperature > 0 else None,
         do_sample=temperature > 0,
@@ -550,7 +553,7 @@ if compare_without_odydora:
     with torch.no_grad(), model.without_odydora():
         model.generate(
             **inputs,
-            max_new_tokens=max_new_tokens,
+            max_new_tokens=gen_limit,
             temperature=temperature if temperature > 0 else None,
             top_p=top_p if temperature > 0 else None,
             do_sample=temperature > 0,

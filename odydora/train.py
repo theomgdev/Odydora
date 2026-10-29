@@ -39,27 +39,55 @@ def lora_config(use_dora=True, r=32, dropout=0.05, targets=LORA_TARGETS):
     )
 
 
-def adapter_only_params(build_model, r, use_dora=True, targets=LORA_TARGETS):
-    """Trainable count for an adapter-only arm at rank `r`, no core."""
-    from peft import get_peft_model
+def adapter_only_params(model_or_build, r, use_dora=True, targets=LORA_TARGETS):
+    """Trainable count for an adapter-only arm at rank `r`, no core.
 
-    model = build_model()
-    model.requires_grad_(False)
-    model = get_peft_model(model, lora_config(use_dora=use_dora, r=r, targets=targets))
-    return sum(p.numel() for p in model.parameters() if p.requires_grad)
+    Calculated directly from the target linear projection dimensions without
+    calling PEFT's model wrapper dispatchers (which fail on environments with
+    stale vendor dependencies like Colab's preinstalled torchao 0.10.0).
+    """
+    if isinstance(model_or_build, torch.nn.Module):
+        model = model_or_build
+    elif callable(model_or_build):
+        model = model_or_build()
+    else:
+        raise TypeError(
+            f"expected nn.Module or factory callable, got {type(model_or_build)}"
+        )
+
+    tot = 0
+    for name, module in model.named_modules():
+        leaf = name.split(".")[-1]
+        if leaf in targets:
+            base = getattr(module, "base_layer", module)
+            if hasattr(base, "in_features") and hasattr(base, "out_features"):
+                din, dout = base.in_features, base.out_features
+                tot += (din + dout) * r
+                if use_dora:
+                    tot += dout
+    return tot
 
 
-def matched_rank(build_model, budget, use_dora=True, max_rank=512):
+def matched_rank(model_or_build, budget, use_dora=True, max_rank=512):
     """Smallest rank whose adapter-only count is closest to `budget`.
 
     This is what makes the parameter-efficiency claim a comparison rather
     than an assertion: the control arm gets the same trainable budget the
     treatment spends, so a win cannot come from simply having more weights.
     """
-    best = (1, adapter_only_params(build_model, 1, use_dora))
+    if isinstance(model_or_build, torch.nn.Module):
+        model = model_or_build
+    elif callable(model_or_build):
+        model = model_or_build()
+    else:
+        raise TypeError(
+            f"expected nn.Module or factory callable, got {type(model_or_build)}"
+        )
+
+    best = (1, adapter_only_params(model, 1, use_dora))
     rank = 1
     while rank <= max_rank:
-        count = adapter_only_params(build_model, rank, use_dora)
+        count = adapter_only_params(model, rank, use_dora)
         if abs(count - budget) < abs(best[1] - budget):
             best = (rank, count)
         if count > budget:

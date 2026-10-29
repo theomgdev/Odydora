@@ -307,11 +307,9 @@ to a matched LoRA is a real finding.
 code("""
 from odydora.adapter import count_parameters
 from odydora.train import matched_rank
-from transformers import AutoConfig, AutoModelForCausalLM
 
 _, core_budget = count_parameters(model)
-rank, matched = matched_rank(lambda: AutoModelForCausalLM.from_config(
-    AutoConfig.from_pretrained(MODEL)), core_budget, use_dora=USE_DORA)
+rank, matched = matched_rank(model, core_budget, use_dora=USE_DORA)
 print(f"core budget {core_budget:,} -> adapter-only rank {rank} gives {matched:,} "
       f"({abs(matched-core_budget)/core_budget:.1%} off)")
 print("Now re-run cells 3-6 with N=0 disabled and RANK set to this rank, then")

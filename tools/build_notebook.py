@@ -355,7 +355,7 @@ code("""
 # @markdown Select an action and specify target filenames if applicable:
 
 import datetime, glob, os, shutil, torch
-from odydora.train import restore
+from odydora.train import inspect_checkpoint, restore
 
 action = "List Checkpoints"  # @param ["List Checkpoints", "Set as Active", "Archive Active (Start Fresh)", "Inspect Checkpoint", "Rename Checkpoint", "Delete Checkpoint"]
 target_checkpoint = "S1_Qwen3-1.7B_N64s64.pt"  # @param {type:"string"}
@@ -372,10 +372,10 @@ if action == "List Checkpoints":
     else:
         if active_name:
             print(f"Active config checkpoint: {active_name}\\n")
-        print("{:<9} {:<36} {:>9}   {:<19} {:>6} {:>8} {:>10}".format(
-            "Status", "Filename", "Size", "Last Modified", "Step", "Traces", "Tokens"
+        print("{:<9} {:<34} {:<12} {:>9}   {:<19} {:>6} {:>8} {:>10}".format(
+            "Status", "Filename", "Arch", "Size", "Last Modified", "Step", "Traces", "Tokens"
         ))
-        print("-" * 105)
+        print("-" * 116)
         for f in files:
             bn = os.path.basename(f)
             stat = os.stat(f)
@@ -383,13 +383,14 @@ if action == "List Checkpoints":
             mod = datetime.datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M:%S")
             status = "[ACTIVE]" if (active_name and bn == active_name) else ""
             try:
-                meta = restore(None, f)
+                meta = inspect_checkpoint(f)
+                arch = f"N={meta['n']} r={meta['r']}"
                 step = str(meta.get("step", "-"))
                 traces = str(meta.get("traces", "-"))
                 tokens = f"{meta.get('tokens', 0):,}" if "tokens" in meta else "-"
             except Exception:
-                step, traces, tokens = "err", "err", "err"
-            print(f"{status:<9} {bn:<36} {size_mb:>9}   {mod:<19} {step:>6} {traces:>8} {tokens:>10}")
+                arch, step, traces, tokens = "err", "err", "err", "err"
+            print(f"{status:<9} {bn:<34} {arch:<12} {size_mb:>9}   {mod:<19} {step:>6} {traces:>8} {tokens:>10}")
 
 elif action == "Set as Active":
     if not active_name:
@@ -508,13 +509,19 @@ if "CHAT_HISTORY" not in globals() or clear_history:
 # 2. Ensure model is loaded and ready
 if "model" not in globals() or "tok" not in globals():
     print(f"Loading {MODEL} and active checkpoint from Drive...")
-    from odydora.train import build, restore
-    model, tok = build(MODEL, n=N, layers=LAYERS, stride=STRIDE, mix=MIX, window=WINDOW,
-                       use_dora=USE_DORA, r=RANK, four_bit=True)
+    from odydora.train import build, inspect_checkpoint, restore
     active_ckpt = f"{CKPT_DIR}/{STAGE}_{MODEL.split('/')[-1]}_N{N}s{STRIDE}.pt"
+    build_n, build_r, build_dora = N, RANK, USE_DORA
+    if os.path.exists(active_ckpt):
+        info = inspect_checkpoint(active_ckpt)
+        build_n = info["n"]
+        build_r = info["r"] or RANK
+        build_dora = info["use_dora"]
+    model, tok = build(MODEL, n=build_n, layers=LAYERS, stride=STRIDE, mix=MIX, window=WINDOW,
+                       use_dora=build_dora, r=build_r, four_bit=True)
     if os.path.exists(active_ckpt):
         meta = restore(model, active_ckpt)
-        print(f"Loaded weights from {os.path.basename(active_ckpt)} (step {meta.get('step', '-')})\\n")
+        print(f"Loaded weights from {os.path.basename(active_ckpt)} (step {meta.get('step', '-')}, N={build_n}, r={build_r})\\n")
     else:
         print(f"Note: no checkpoint found at {active_ckpt}; using freshly initialized model.\\n")
 
@@ -536,6 +543,13 @@ print("Odydora (Recurrent Core):")
 streamer = TextStreamer(tok, skip_prompt=True)
 model.eval()
 
+# Snapshot RNG before Odydora generates so side-by-side comparison samples from
+# the exact same noise trajectory.
+cpu_rng = torch.get_rng_state()
+cuda_rng = torch.cuda.get_rng_state() if torch.cuda.is_available() else None
+
+import time as _time
+_t0 = _time.time()
 with torch.no_grad():
     output_ids = model.generate(
         **inputs,
@@ -547,6 +561,7 @@ with torch.no_grad():
         eos_token_id=tok.eos_token_id,
         streamer=streamer,
     )
+_gen_dt = max(_time.time() - _t0, 1e-6)
 
 new_tokens = output_ids[0][inputs["input_ids"].shape[1]:]
 assistant_reply = tok.decode(new_tokens, skip_special_tokens=True).strip()
@@ -554,6 +569,9 @@ assistant_reply = tok.decode(new_tokens, skip_special_tokens=True).strip()
 if compare_without_odydora:
     print("\\n" + "─" * 60)
     print("Without Odydora (Base Network / Recurrence Bypassed):")
+    torch.set_rng_state(cpu_rng)
+    if cuda_rng is not None:
+        torch.cuda.set_rng_state(cuda_rng)
     streamer_base = TextStreamer(tok, skip_prompt=True)
     with torch.no_grad(), model.without_odydora():
         model.generate(
@@ -572,9 +590,12 @@ CHAT_HISTORY.append({"role": "assistant", "content": assistant_reply})
 
 layers = getattr(model, "odydora_layers", ())
 if layers:
+    states = [s for s in model.odydora_state().values() if s is not None]
     last_s = model.odydora_state().get(layers[-1])
     s_norm = f"{last_s.norm().item():.3f}" if last_s is not None else "0.0"
-    print(f"\\n[Turn {len(CHAT_HISTORY)//2} | recurrent state norm |s|: {s_norm} carried to next turn]")
+    mean_s = f"{sum(s.norm().item() for s in states)/len(states):.3f}" if states else "0.0"
+    n_tok = int(new_tokens.numel())
+    print(f"\\n[Turn {len(CHAT_HISTORY)//2} | {n_tok} tok ({n_tok/_gen_dt:.1f} tok/s) | state |s|: {s_norm} (mean {mean_s} across {len(layers)} layers)]")
 """, metadata={"cellView": "form"})
 
 nb = {

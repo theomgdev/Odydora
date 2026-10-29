@@ -398,15 +398,48 @@ def save(model, path, step=0, traces=0, tokens=0, extra=None):
     return path
 
 
+def inspect_checkpoint(path):
+    """Read checkpoint cursor and inferred architecture without building a model."""
+    blob = torch.load(str(path), map_location="cpu", weights_only=True)
+    trainable = blob.get("trainable", {})
+    w = trainable.get("odydora_core.W")
+    n = int(w.shape[0]) if w is not None else 0
+    r = 0
+    for key, tensor in trainable.items():
+        if "lora_A" in key and tensor.ndim == 2:
+            r = int(tensor.shape[0])
+            break
+    use_dora = any("lora_magnitude_vector" in k for k in trainable)
+    params = sum(t.numel() for t in trainable.values()) - n
+    info = {k: v for k, v in blob.items() if k != "trainable"}
+    info.update({"n": n, "r": r, "use_dora": use_dora, "trainable_params": params})
+    return info
+
+
 def restore(model, path):
     """Load a checkpoint, returning its metadata (including the cursor)."""
     # weights_only=True: the payload is only tensors and ints, so there is no
     # reason to let a checkpoint unpickle arbitrary objects.
     blob = torch.load(str(path), map_location="cpu", weights_only=True)
     if model is not None:
-        missing, unexpected = model.load_state_dict(blob["trainable"], strict=False)
+        try:
+            missing, unexpected = model.load_state_dict(blob["trainable"], strict=False)
+        except RuntimeError as exc:
+            info = inspect_checkpoint(path)
+            core = getattr(model, "odydora_core", None)
+            model_n = core.n if core is not None else 0
+            raise ValueError(
+                f"checkpoint architecture (N={info['n']}, r={info['r']}, "
+                f"use_dora={info['use_dora']}) does not match model (N={model_n}): {exc}"
+            ) from exc
         if unexpected:
-            raise ValueError(f"checkpoint carries unknown tensors: {unexpected[:4]}")
+            info = inspect_checkpoint(path)
+            core = getattr(model, "odydora_core", None)
+            model_n = core.n if core is not None else 0
+            raise ValueError(
+                f"checkpoint carries unexpected tensors {unexpected[:4]} "
+                f"(checkpoint N={info['n']}, r={info['r']} vs model N={model_n})"
+            )
     return {k: v for k, v in blob.items() if k != "trainable"}
 
 

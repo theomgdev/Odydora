@@ -330,28 +330,32 @@ code("""
 # @title 📁 Checkpoint Manager { display-mode: "form" }
 # @markdown Select an action and specify target filenames if applicable:
 
-import datetime, glob, os, torch
+import datetime, glob, os, shutil, torch
 from odydora.train import restore
 
-action = "List Checkpoints"  # @param ["List Checkpoints", "Inspect Checkpoint", "Rename Checkpoint", "Delete Checkpoint"]
+action = "List Checkpoints"  # @param ["List Checkpoints", "Set as Active", "Inspect Checkpoint", "Rename Checkpoint", "Delete Checkpoint"]
 target_checkpoint = "S1_Qwen3-1.7B_N64s64.pt"  # @param {type:"string"}
 new_name = ""  # @param {type:"string"}
 confirm_delete = False  # @param {type:"boolean"}
 
 os.makedirs(CKPT_DIR, exist_ok=True)
 files = sorted(glob.glob(os.path.join(CKPT_DIR, "*.pt")), key=os.path.getmtime, reverse=True)
+active_name = f"{STAGE}_{MODEL.split('/')[-1]}_N{N}s{STRIDE}.pt" if "STAGE" in globals() and "MODEL" in globals() else ""
 
 if action == "List Checkpoints":
     if not files:
         print(f"No .pt checkpoints found in {CKPT_DIR}")
     else:
-        print(f"Found {len(files)} checkpoint(s) in {CKPT_DIR}:\\n")
-        print(f"{\"Filename\":<38} {\"Size\":>9}   {\"Last Modified\":<19} {\"Step\":>6} {\"Traces\":>8} {\"Tokens\":>10}")
-        print("-" * 96)
+        if active_name:
+            print(f"Active config checkpoint: {active_name}\\n")
+        print(f"{\"Status\":<9} {\"Filename\":<36} {\"Size\":>9}   {\"Last Modified\":<19} {\"Step\":>6} {\"Traces\":>8} {\"Tokens\":>10}")
+        print("-" * 105)
         for f in files:
+            bn = os.path.basename(f)
             stat = os.stat(f)
             size_mb = f"{stat.st_size / (1024 * 1024):.1f} MB"
             mod = datetime.datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M:%S")
+            status = "[ACTIVE]" if (active_name and bn == active_name) else ""
             try:
                 meta = restore(None, f)
                 step = str(meta.get("step", "-"))
@@ -359,7 +363,31 @@ if action == "List Checkpoints":
                 tokens = f"{meta.get('tokens', 0):,}" if "tokens" in meta else "-"
             except Exception:
                 step, traces, tokens = "err", "err", "err"
-            print(f"{os.path.basename(f):<38} {size_mb:>9}   {mod:<19} {step:>6} {traces:>8} {tokens:>10}")
+            print(f"{status:<9} {bn:<36} {size_mb:>9}   {mod:<19} {step:>6} {traces:>8} {tokens:>10}")
+
+elif action == "Set as Active":
+    if not active_name:
+        print("Error: please run Cell 2 (Config) first to identify the active model configuration.")
+    else:
+        active_path = os.path.join(CKPT_DIR, active_name)
+        src = os.path.join(CKPT_DIR, target_checkpoint.strip())
+        if not os.path.exists(src):
+            print(f"Error: target checkpoint '{target_checkpoint}' not found in {CKPT_DIR}")
+            print("Available files:", [os.path.basename(f) for f in files])
+        elif os.path.abspath(src) == os.path.abspath(active_path):
+            print(f"'{target_checkpoint}' is already the active checkpoint for current config ({active_name}).")
+        else:
+            # Safety backup: preserve the existing active checkpoint before overwriting!
+            if os.path.exists(active_path):
+                ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                base, ext = os.path.splitext(active_name)
+                backup_name = f"{base}_bak_{ts}{ext}"
+                backup_path = os.path.join(CKPT_DIR, backup_name)
+                shutil.copy2(active_path, backup_path)
+                print(f"Safety backup created: {backup_name}")
+            shutil.copy2(src, active_path)
+            print(f"Success: set '{os.path.basename(src)}' as active checkpoint ({active_name}).")
+            print("Cell 5 will resume from this checkpoint on its next run.")
 
 elif action == "Inspect Checkpoint":
     target_path = os.path.join(CKPT_DIR, target_checkpoint.strip())

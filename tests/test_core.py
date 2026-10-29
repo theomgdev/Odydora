@@ -1,3 +1,5 @@
+import warnings
+
 import torch
 from torch import nn
 
@@ -142,3 +144,22 @@ def test_mix_cannot_leave_zero_one_however_alpha_trains():
     for value in (-50.0, 50.0):
         core.alpha.data.fill_(value)
         assert 0.0 < float(core.mix) < 1.0, f"alpha={value} escaped the interval"
+
+
+def test_repr_does_not_touch_the_autograd_graph():
+    """Printing the module must not convert a grad-tracking tensor to a scalar.
+
+    `mix` is a property derived from the live `alpha` parameter, so it carries
+    requires_grad, and the warning torch raises for that recommends detaching.
+
+    Honest limitation: this test passes on torch 2.7.1 even with the old
+    `float(self.mix)` code, because 2.7 does not warn there -- the warning was
+    observed on Colab's newer torch. So it is a guard against regression on
+    newer runtimes, not a test that failed here first.
+    """
+    core = RecurrentCore(n=8, width=16, mix=0.02)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", UserWarning)
+        text = repr(core)
+    assert "mix=0.0200" in text
+    assert not core.mix.detach().requires_grad

@@ -128,7 +128,10 @@ class RecurrentCore(nn.Module):
         return delta.reshape(batch, segments * self.stride, -1)[:, :time], s
 
     def extra_repr(self):
+        # `mix` is a property computed from a live parameter, so it carries
+        # requires_grad; detach before formatting or printing the module warns
+        # about converting a grad-tracking tensor to a scalar.
         return (
             f"n={self.n}, stride={self.stride}, "
-            f"mix={float(self.mix):.4f}, window={self.window}"
+            f"mix={self.mix.detach().item():.4f}, window={self.window}"
         )

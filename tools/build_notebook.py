@@ -268,8 +268,8 @@ tail_delta = base_eval["tail_bits_per_token"] - final["tail_bits_per_token"]
 print(f"            step 0     now      delta")
 print(f"overall     {base_eval['bits_per_token']:.4f}   {final['bits_per_token']:.4f}   {delta:+.4f}")
 print(f"tail 25%    {base_eval['tail_bits_per_token']:.4f}   {final['tail_bits_per_token']:.4f}   {tail_delta:+.4f}")
-print(f"\\nmix {float(model.odydora_core.mix):.4f} (init {MIX})   "
-      f"|up| {model.odydora_core.up.weight.norm():.4f} (init 0.0)")
+print(f"\\nmix {model.odydora_core.mix.detach().item():.4f} (init {MIX})   "
+      f"|up| {model.odydora_core.up.weight.detach().norm():.4f} (init 0.0)")
 print(f"\\nS1 gate: {'PASS' if delta > 0 else 'FAIL - the core is not helping yet'}")
 """)
 

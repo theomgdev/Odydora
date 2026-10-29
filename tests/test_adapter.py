@@ -158,3 +158,29 @@ def test_the_core_attaches_through_a_dora_wrapper():
     assert model.odydora_calls() == 2
     adapter, core_params = count_parameters(model)
     assert adapter > 0 and core_params > 0
+
+
+def test_attach_core_with_zero_n_is_noop_control_arm():
+    """n=0 or n=None creates a clean adapter-only arm with no core parameters."""
+    from peft import LoraConfig, get_peft_model
+
+    wrapped = get_peft_model(
+        tiny_qwen(),
+        LoraConfig(r=4, target_modules=["q_proj"], task_type="CAUSAL_LM"),
+    )
+    model = attach_core(wrapped, n=0, freeze_base=False)
+    assert model.odydora_core is None
+    assert model.odydora_layers == ()
+    assert model.odydora_calls() == 0
+    model.odydora_reset_state()
+    model.odydora_detach_state()
+    assert model.odydora_state() == {}
+
+    adapter, core = count_parameters(model)
+    assert core == 0
+    assert adapter > 0
+
+    ids = torch.randint(0, 128, (1, 16))
+    loss = model(input_ids=ids, labels=ids).loss
+    loss.backward()
+    assert loss.item() > 0

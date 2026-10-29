@@ -306,8 +306,12 @@ tail_delta = base_eval["tail_bits_per_token"] - final["tail_bits_per_token"]
 print(f"            step 0     now      delta")
 print(f"overall     {base_eval['bits_per_token']:.4f}   {final['bits_per_token']:.4f}   {delta:+.4f}")
 print(f"tail 25%    {base_eval['tail_bits_per_token']:.4f}   {final['tail_bits_per_token']:.4f}   {tail_delta:+.4f}")
-print(f"\\nmix {model.odydora_core.mix.detach().item():.4f} (init {MIX})   "
-      f"|up| {model.odydora_core.up.weight.detach().norm():.4f} (init 0.0)")
+core = getattr(model, "odydora_core", None)
+if core is not None:
+    print(f"\\nmix {core.mix.detach().item():.4f} (init {MIX})   "
+          f"|up| {core.up.weight.detach().norm():.4f} (init 0.0)")
+else:
+    print("\\ncore: None (adapter-only control arm)")
 print(f"\\nS1 gate: {'PASS' if delta > 0 else 'FAIL - the core is not helping yet'}")
 """)
 
@@ -328,8 +332,10 @@ _, core_budget = count_parameters(model)
 rank, matched = matched_rank(model, core_budget, use_dora=USE_DORA)
 print(f"core budget {core_budget:,} -> adapter-only rank {rank} gives {matched:,} "
       f"({abs(matched-core_budget)/core_budget:.1%} off)")
-print("Now re-run cells 3-6 with N=0 disabled and RANK set to this rank, then")
-print("compare tail bits/token. Same seed, same traces, same step count.")
+print(f"\\nTo run the comparison baseline:")
+print(f"1. In Cell 2 (Config), set: N = 0  and  RANK = {rank}")
+print(f"2. Run Cells 2 through 6 to train and evaluate the adapter-only arm.")
+print(f"3. Compare the tail bits/token against your Odydora core run!")
 """)
 
 md("""

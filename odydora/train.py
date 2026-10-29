@@ -179,7 +179,8 @@ def train_steps(model, batches, optimizer, log_every=10, grad_accum=1, on_step=N
 
         if is_trace_start:
             model.odydora_reset_state()
-        state_in = model.odydora_state().get(model.odydora_layers[0])
+        layers = getattr(model, "odydora_layers", ())
+        state_in = model.odydora_state().get(layers[0]) if layers else None
         if on_step is not None:
             on_step(step, is_trace_start, None if state_in is None else state_in.clone())
 
@@ -216,15 +217,21 @@ def train_steps(model, batches, optimizer, log_every=10, grad_accum=1, on_step=N
         tokens += ids.numel()
 
         if (step + 1) % log_every == 0:
-            state = model.odydora_state().get(model.odydora_layers[-1])
+            state = model.odydora_state().get(layers[-1]) if layers else None
             elapsed = max(time.time() - began, 1e-9)
+            core_mod = getattr(model, "odydora_core", None)
+            up_norm = (
+                core_mod.up.weight.detach().norm().item()
+                if core_mod is not None
+                else 0.0
+            )
             row = {
                 "step": step + 1,
                 "loss": sum(losses) / len(losses),
                 "tok_s": tokens / elapsed,
                 "tokens": tokens,
                 "state_norm": 0.0 if state is None else state.norm().item(),
-                "up_norm": model.odydora_core.up.weight.detach().norm().item(),
+                "up_norm": up_norm,
                 "elapsed": time.time() - started,
             }
             losses = []

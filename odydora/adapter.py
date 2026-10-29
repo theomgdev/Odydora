@@ -98,7 +98,22 @@ def attach_core(model, n, layers=None, stride=64, mix=0.02, window=0, freeze_bas
     trainable. Returns the same model object, carrying `odydora_core`,
     `odydora_layers`, `odydora_reset_state()`, `odydora_detach_state()`,
     `odydora_state()` and `odydora_calls()`.
+
+    `n=0` or `n=None` creates an adapter-only control arm: no hooks are registered,
+    core parameter count is 0, and the recurrent lifecycle methods become no-ops.
     """
+    if not n:
+        model.odydora_core = None
+        model.odydora_layers = ()
+        model.odydora_handles = []
+        model.odydora_reset_state = lambda: None
+        model.odydora_detach_state = lambda: None
+        model.odydora_state = lambda: {}
+        model.odydora_calls = lambda: 0
+        if freeze_base:
+            model.requires_grad_(False)
+        return model
+
     path, stack = _resolve_stack(model)
     indices = tuple(range(len(stack))) if layers is None else tuple(layers)
     for i in indices:
@@ -144,11 +159,16 @@ def count_parameters(model):
     Anything trainable that is not the core counts as adapter, which is what
     makes a matched-parameter comparison against an adapter-only arm possible.
     """
-    core_ids = {id(p) for p in model.odydora_core.parameters()}
-    core = sum(p.numel() for p in model.odydora_core.parameters() if p.requires_grad)
+    core_mod = getattr(model, "odydora_core", None)
+    if core_mod is None:
+        adapter = sum(p.numel() for p in model.parameters() if p.requires_grad)
+        return adapter, 0
+
+    core_ids = {id(p) for p in core_mod.parameters()}
+    core = sum(p.numel() for p in core_mod.parameters() if p.requires_grad)
     # W's diagonal is pinned at zero and never trains, so it is not a parameter.
-    if model.odydora_core.W.requires_grad:
-        core -= model.odydora_core.n
+    if hasattr(core_mod, "W") and core_mod.W.requires_grad:
+        core -= core_mod.n
     adapter = sum(
         p.numel()
         for p in model.parameters()

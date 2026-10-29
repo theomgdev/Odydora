@@ -198,7 +198,7 @@ def train_steps(model, batches, optimizer, log_every=10, grad_accum=1, on_step=N
 
 
 @torch.no_grad()
-def evaluate(model, batches, tail_fraction=0.25):
+def evaluate(model, batches, tail_fraction=0.25, log_every=0, desc="eval"):
     """Mean loss in bits per token, overall and over the trailing chunks.
 
     The tail number is the one that matters: carrying state across chunks can
@@ -207,13 +207,17 @@ def evaluate(model, batches, tail_fraction=0.25):
     """
     model.eval()
     rows = []
-    for ids, labels, is_trace_start in batches:
+    total = len(batches) if hasattr(batches, "__len__") else None
+    for step, (ids, labels, is_trace_start) in enumerate(batches):
         device = next(model.parameters()).device
         if is_trace_start:
             model.odydora_reset_state()
         out = model(input_ids=ids.to(device), labels=labels.to(device))
         supervised = int((labels != -100).sum())
         rows.append((out.loss.item(), supervised, is_trace_start))
+        if log_every and (step + 1) % log_every == 0:
+            target = f"/{total}" if total else ""
+            print(f"  {desc} chunk {step + 1}{target}...", flush=True)
 
     def bits(selected):
         total = sum(loss * count for loss, count, _ in selected)

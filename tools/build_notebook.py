@@ -99,8 +99,8 @@ the 4.x API.
 """)
 
 code("""
-!pip -q install "transformers>=4.46,<5" "peft>=0.13" "bitsandbytes>=0.44" "datasets>=4.8" "accelerate>=1.0"
-!git clone -q https://github.com/theomgdev/Odydora /content/Odydora || git -C /content/Odydora pull -q
+!pip install "transformers>=4.46,<5" "peft>=0.13" "bitsandbytes>=0.44" "datasets>=4.8" "accelerate>=1.0"
+!git clone https://github.com/theomgdev/Odydora /content/Odydora || git -C /content/Odydora pull
 
 import os, sys, torch
 
@@ -246,7 +246,7 @@ if os.path.exists(CKPT):
     print(f"resumed: step {start['step']}, {start['tokens']:,} tokens, "
           f"trace cursor {start['traces']}")
 
-base_eval = evaluate(model, VAL)
+base_eval = evaluate(model, VAL, log_every=25, desc="baseline eval")
 print(f"step-0 held-out: {base_eval['bits_per_token']:.4f} bits/token "
       f"(tail {base_eval['tail_bits_per_token']:.4f})  <- the number to beat")
 
@@ -273,7 +273,7 @@ but not in the tail is not the mechanism working.
 """)
 
 code("""
-final = evaluate(model, VAL)
+final = evaluate(model, VAL, log_every=25, desc="final eval")
 delta = base_eval["bits_per_token"] - final["bits_per_token"]
 tail_delta = base_eval["tail_bits_per_token"] - final["tail_bits_per_token"]
 

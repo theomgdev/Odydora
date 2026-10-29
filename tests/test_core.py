@@ -97,13 +97,44 @@ def test_the_convex_mix_keeps_old_inputs_influential():
 def test_carry_across_chunks_equals_one_long_pass():
     torch.manual_seed(2)
     core = RecurrentCore(n=16, width=32, stride=4, window=0)
+    nn.init.xavier_uniform_(core.up.weight)
     x = torch.randn(1, 24, 32)
-    whole, _ = core(x)
+    whole, s_whole = core(x)
     a, s = core(x[:, :12])
-    b, _ = core(x[:, 12:], state=s)
+    b, s_chunked = core(x[:, 12:], state=s)
+    assert whole.abs().sum() > 0, "up must be open so delta comparison is non-trivial"
     assert torch.allclose(whole, torch.cat([a, b], dim=1), atol=1e-5), (
         "chunked carry must equal one pass, or every later measurement is void"
     )
+    assert torch.allclose(s_whole, s_chunked, atol=1e-5)
+
+
+def test_partial_segment_mean_is_not_diluted_by_zero_padding():
+    """A partial segment (such as time=1 in autoregressive decoding or a ragged
+    tail chunk) must divide by its true token count, not by `stride`.
+    """
+    torch.manual_seed(3)
+    core = RecurrentCore(n=16, width=32, stride=16, mix=0.2)
+    nn.init.xavier_uniform_(core.up.weight)
+    s_prev = torch.randn(1, 16)
+
+    token = torch.randn(1, 1, 32) * 2.0
+    full_seg = token.expand(1, 16, 32).contiguous()
+
+    delta_one, s_one = core(token, state=s_prev)
+    delta_full, s_full = core(full_seg, state=s_prev)
+    assert torch.allclose(s_one, s_full, atol=1e-5), (
+        f"time=1 state diverged from full segment: {(s_one - s_full).norm():.4f}"
+    )
+    assert torch.allclose(delta_one[:, 0], delta_full[:, 0], atol=1e-5)
+
+    # Also check multi-segment ragged tail (1 full segment + 3 identical tail tokens)
+    head = torch.randn(1, 16, 32)
+    ragged = torch.cat([head, token.expand(1, 3, 32)], dim=1)
+    padded_equiv = torch.cat([head, full_seg], dim=1)
+    _, s_ragged = core(ragged, state=s_prev)
+    _, s_equiv = core(padded_equiv, state=s_prev)
+    assert torch.allclose(s_ragged, s_equiv, atol=1e-5)
 
 
 def test_stride_sets_the_number_of_state_updates_not_the_parameters():

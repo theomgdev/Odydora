@@ -240,10 +240,10 @@ number. Watch `state_norm` stays finite and `mix` moves off its initial value.
 
 code("""
 import itertools, time, torch
-from odydora.train import evaluate, restore, save, train_steps
+from odydora.train import configure_optimizer, evaluate, restore, save, train_steps
 
 CKPT = f"{CKPT_DIR}/{STAGE}_{MODEL.split('/')[-1]}_N{N}s{STRIDE}.pt"
-opt = torch.optim.AdamW([p for p in model.parameters() if p.requires_grad], lr=LR)
+opt = configure_optimizer(model, lr=LR)
 
 start = {"step": 0, "traces": 0, "tokens": 0}
 if os.path.exists(CKPT) and RESUME:
@@ -251,7 +251,12 @@ if os.path.exists(CKPT) and RESUME:
     print(f"resumed: step {start['step']}, {start['tokens']:,} tokens, "
           f"trace cursor {start['traces']}")
 elif os.path.exists(CKPT) and not RESUME:
-    print(f"RESUME=False: starting fresh run from step 0 (existing checkpoint will be backed up on save)")
+    import datetime, shutil
+    ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    base, ext = os.path.splitext(CKPT)
+    bak = f"{base}_prefresh_bak_{ts}{ext}"
+    shutil.copy2(CKPT, bak)
+    print(f"RESUME=False: backed up existing checkpoint -> {os.path.basename(bak)}")
 else:
     print(f"fresh run: starting from step 0 (no checkpoint found)")
 
@@ -266,6 +271,8 @@ def fmt_time(seconds):
 
 stream = batches(skip=start["traces"], limit=CFG["traces"])
 rows = []
+last_save = time.time()
+save_every_s = CFG.get("save_every_s", 900)
 try:
     for r in train_steps(model, stream, opt, log_every=CFG["log_every"],
                          grad_accum=CFG["grad_accum"]):
@@ -273,20 +280,18 @@ try:
         print(f"  step {r['step']:>5}  loss {r['loss']:.4f}  {r['tok_s']:>7,.0f} tok/s  "
               f"|s| {r['state_norm']:.3f}  |up| {r['up_norm']:.4f}  "
               f"[{fmt_time(r['elapsed'])}]", flush=True)
+        if save_every_s and (time.time() - last_save) >= save_every_s:
+            save(model, CKPT, step=start["step"] + r["step"],
+                 traces=start["traces"] + r["traces"],
+                 tokens=start["tokens"] + r["tokens"])
+            last_save = time.time()
+            print(f"  [checkpoint saved -> {os.path.basename(CKPT)} at trace {start['traces'] + r['traces']}]", flush=True)
 except KeyboardInterrupt:
     print("\\n[interrupted by user] stopping training early and saving checkpoint...", flush=True)
 
-if os.path.exists(CKPT) and not RESUME and start["step"] == 0:
-    import datetime, shutil
-    ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    base, ext = os.path.splitext(CKPT)
-    bak = f"{base}_prefresh_bak_{ts}{ext}"
-    shutil.copy2(CKPT, bak)
-    print(f"Safety backup created: {os.path.basename(bak)}")
-
 save(model, CKPT, step=start["step"] + (rows[-1]["step"] if rows else 0),
-     traces=start["traces"] + CFG["traces"], tokens=start["tokens"] +
-     (rows[-1]["tokens"] if rows else 0))
+     traces=start["traces"] + (rows[-1]["traces"] if rows else 0),
+     tokens=start["tokens"] + (rows[-1]["tokens"] if rows else 0))
 print(f"saved -> {CKPT}")
 """)
 

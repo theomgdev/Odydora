@@ -3,6 +3,7 @@ from transformers import Qwen2Config, Qwen2ForCausalLM
 
 from odydora.adapter import attach_core, count_parameters
 from odydora.train import (
+    configure_optimizer,
     lora_config,
     matched_rank,
     restore,
@@ -96,7 +97,68 @@ def test_checkpoint_round_trips_weights_and_the_corpus_cursor(tmp_path):
     model.odydora_core.W.data.add_(0.123)
     path = tmp_path / "ckpt.pt"
     save(model, path, step=17, traces=5, tokens=4096)
+    assert not (tmp_path / "ckpt.pt.tmp").exists(), "atomic save left .tmp behind"
     fresh = attach_core(tiny_qwen(), n=16, layers=(0, 1), stride=4)
     meta = restore(fresh, path)
     assert meta["step"] == 17 and meta["traces"] == 5 and meta["tokens"] == 4096
     assert torch.allclose(fresh.odydora_core.W, model.odydora_core.W)
+
+
+def test_configure_optimizer_separates_families_and_scales_core_lr():
+    """Modulation parameters (alpha, RMSNorm gain, DoRA magnitudes) must have
+    weight_decay=0.0 because zero is not their neutral point; the shared core
+    receives `lr * core_lr_scale` and `alpha` receives `5x` more to offset the
+    sigmoid Jacobian.
+    """
+    from peft import get_peft_model
+
+    wrapped = get_peft_model(
+        tiny_qwen(), lora_config(use_dora=True, r=4, targets=("q_proj", "v_proj"))
+    )
+    model = attach_core(wrapped, n=16, stride=4, freeze_base=False)
+    opt = configure_optimizer(model, lr=2e-4, core_lr_scale=5.0, weight_decay=0.01)
+
+    by_name = {g["group_name"]: g for g in opt.param_groups}
+    assert set(by_name) == {
+        "adapter_decay",
+        "adapter_no_decay",
+        "core_decay",
+        "core_no_decay",
+        "core_alpha",
+    }
+    assert by_name["adapter_decay"]["lr"] == 2e-4
+    assert by_name["adapter_decay"]["weight_decay"] == 0.01
+    assert by_name["adapter_no_decay"]["weight_decay"] == 0.0
+    assert abs(by_name["core_decay"]["lr"] - 1e-3) < 1e-12
+    assert by_name["core_decay"]["weight_decay"] == 0.01
+    assert by_name["core_no_decay"]["weight_decay"] == 0.0
+    assert abs(by_name["core_alpha"]["lr"] - 5e-3) < 1e-12
+    assert by_name["core_alpha"]["weight_decay"] == 0.0
+
+
+def test_train_steps_tracks_actual_traces_consumed():
+    """Each `is_trace_start=True` increments `traces` in the yielded row so an
+    interrupted run saves the true trace cursor rather than the target count.
+    """
+    model = attach_core(tiny_qwen(), n=16, layers=(0, 1), stride=4)
+    opt = configure_optimizer(model, lr=1e-3)
+    # 6 chunks where chunks 0 and 3 start new traces -> 2 traces total
+    rows = list(train_steps(model, batches(count=6, chunk=8), opt, log_every=2))
+    assert [r["traces"] for r in rows] == [1, 2, 2]
+
+
+def test_package_root_exports_public_api():
+    import odydora
+
+    for symbol in (
+        "RecurrentCore",
+        "attach_core",
+        "build",
+        "configure_optimizer",
+        "train_steps",
+        "evaluate",
+        "save",
+        "restore",
+        "without_odydora",
+    ):
+        assert hasattr(odydora, symbol), f"odydora.{symbol} missing from top-level package"

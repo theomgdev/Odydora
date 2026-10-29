@@ -35,7 +35,8 @@ quant = ["bitsandbytes>=0.45"]
 dev = ["pytest>=8.0", "ruff>=0.6"]
 
 [project.urls]
-Homepage = "https://github.com/theomgdev/Odydora"
+Homepage = "https://colab.research.google.com/github/theomgdev/Odydora/blob/main/notebooks/odydora_colab.ipynb"
+Repository = "https://github.com/theomgdev/Odydora"
 Issues = "https://github.com/theomgdev/Odydora/issues"
 
 [tool.setuptools.packages.find]

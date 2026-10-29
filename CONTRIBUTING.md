@@ -27,7 +27,7 @@ Add `.[quant]` for the 4-bit path. It is deliberately optional: `bitsandbytes`
 is CUDA-only, and the library plus its whole test suite run without it.
 
 ```bash
-pytest -q          # 36 tests, CPU-only, no network, a few seconds
+pytest -q          # 43 tests, CPU-only, no network, a few seconds
 ruff check .
 ```
 
@@ -80,9 +80,11 @@ change. That is a welcome pull request, not a forbidden one.
 - Loss is on **assistant turns only**, including their `tool_calls` — choosing
   the tool and its arguments is the reasoning being trained. The `tool` role's
   returns stay masked.
-- The mask is built by templating turn by turn and **diffing lengths**, never by
-  string-matching a role marker, which shifts the whole mask the moment a trace
-  contains the marker as content.
+- The mask is built by tokenizing the finished conversation once and locating
+  each assistant turn's span by **sentinel substitution**, never by diffing
+  prefix renders (which breaks when a template rewrites the final turn) or
+  string-matching a role marker (which shifts the mask when content contains
+  the marker).
 - Held-out splits are by **trace**, never by chunk. Carried state leaks across a
   chunk-level split and the eval number becomes meaningless.
 - `split="train"` is the clean split. `split="full"` is twice the size and
@@ -111,7 +113,7 @@ lets the constants drift from what the package actually accepts.
 ## Commits and pull requests
 
 - Write what was wrong, not what the diff shows. The reader can see the diff.
-- Quote test counts, not adjectives: "36 tests pass", not "tests pass".
+- Quote test counts, not adjectives: "43 tests pass", not "tests pass".
 - Keep the change surgical. Do not reformat what you scrolled past.
 - Do not claim a result you did not observe. If you did not run it, say so.
 - If a model assisted, disclose it — a line in the PR or an `Assisted-by:`

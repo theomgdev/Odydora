@@ -45,11 +45,10 @@ def normalize_messages(messages):
 def mask_assistant_turns(messages, tokenizer, tools=None):
     """Return (ids, labels) with everything but assistant content masked.
 
-    The mask is built by templating the conversation prefix by prefix and
-    taking the length difference, never by string-matching a role marker:
-    a trace whose content happens to contain the marker would otherwise
-    silently shift the whole mask. The cost is one template call per turn,
-    which is nothing beside tokenizing the text itself.
+    The mask is built by tokenizing the finished conversation once with offset
+    mappings and locating each assistant turn's character span via NUL-sentinel
+    substitution (`_assistant_char_spans`), never by string-matching a role
+    marker or diffing consecutive prefix renders.
 
     An assistant turn is supervised whole, including its `tool_calls` --
     deciding which tool to invoke with which arguments is the reasoning we

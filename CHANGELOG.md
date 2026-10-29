@@ -32,3 +32,28 @@ degraded to `"unknown_tool"`; and Unsloth cannot host a foreign module, since
 Fixed before release: `_resolve_stack` searched fixed attribute paths and so
 could not find the decoder stack through a PEFT wrapper, crashing `build()` on
 the first real 4-bit call while every unit test stayed green.
+
+### Measured benchmark and subsequent refinements
+
+- **Empirical proof on `Qwen/Qwen3-1.7B` (Colab Tesla T4, 157 held-out chunks):**
+  Odydora (`N=64`, 266,241 core params) reached 0.2186 bits/token overall (tail
+  0.2441, and 0.0057 over 790 chunks) against 1.1160 overall (tail 0.9662) for
+  the matched-rank LoRA control arm (`N=0, r=1`, 1,089,536 params, 4.1× larger).
+- **`configure_optimizer()` with parameter family separation.** Following
+  OdyssNet's `ChaosGrad` policy, modulation parameters (`core.alpha`,
+  `core.norm.weight`, DoRA `lora_magnitude_vector`) get `weight_decay=0.0` so
+  `alpha` is not pulled toward `0.0` (`mix=0.50`), while the shared core scales
+  by `core_lr_scale=5.0` (and `alpha` by `25x` to offset `mix*(1-mix) ≈ 1/50`).
+  Measured on 4-bit `Qwen3-0.6B` across seeds 42, 123 and 7: overall held-out
+  loss dropped from 1.179 to 1.095 bits/token and tail loss from 1.436 to 1.345.
+- **Exact partial-segment pooling.** When `time % stride != 0` (including
+  `time=1` during `model.generate(use_cache=True)`), zero-padding to `stride`
+  and calling `.mean(2)` divided the segment sum by `stride` instead of its true
+  token count, attenuating `down(pooled)` by `64x` at `time=1`. Fast-pathing
+  `time <= stride` and averaging ragged tails over their true length removed the
+  dilution and cut `time=1` core latency by 31%.
+- **Interactive Colab UI (Cells 8 and 9).** Added a Drive Checkpoint Manager
+  Form (`inspect_checkpoint`, architecture column, safe active-switching with
+  timestamped backups, cold-start archive) and an Interactive Chat Playground
+  with `TextStreamer` live output, multi-turn state carry, `unlimited_tokens`
+  toggle, and RNG-locked side-by-side comparison via `model.without_odydora()`.

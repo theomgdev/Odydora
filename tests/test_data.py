@@ -189,7 +189,10 @@ def test_the_default_split_is_the_clean_one_not_the_large_one():
 
     from odydora.data import stream_traces
 
-    assert inspect.signature(stream_traces).parameters["split"].default == "train"
+    sig = inspect.signature(stream_traces)
+    assert sig.parameters["split"].default == "train"
+    assert "max_traces" in sig.parameters
+    assert sig.parameters["max_traces"].default is None
 
 
 # The template that exposed two real bugs. The simple monotone template above

@@ -114,7 +114,7 @@ git clone https://github.com/theomgdev/Odydora
 cd Odydora
 python -m venv .venv && .venv/Scripts/activate   # or source .venv/bin/activate
 pip install -e ".[dev]"
-pytest -q                                        # 31 tests, CPU, no downloads
+pytest -q                                        # 36 tests, CPU, no downloads
 ```
 
 ## Use
@@ -126,7 +126,7 @@ from odydora.data import stream_traces
 model, tok = build("Qwen/Qwen3-1.7B", n=64, stride=64, mix=0.02, four_bit=True)
 print(report(model))          # total / trainable / adapter / core
 
-batches = stream_traces(tok, chunk=1024, max_trace_tokens=4096)
+batches = stream_traces(tok, chunk=1024, max_trace_tokens=4096, max_traces=160)
 log = train_steps(model, batches, optimizer, log_every=10, grad_accum=16)
 print(evaluate(model, val_batches))   # bits/token, overall and tail-only
 ```
@@ -176,9 +176,10 @@ that is mostly tool output), so a token budget is tokens *seen*, not tokens
 Loss is computed on assistant turns only — including their `tool_calls`, since
 choosing the tool and its arguments is the reasoning being trained. The `tool`
 role's returns are the environment talking back and stay masked. The mask is
-built by templating turn by turn and diffing lengths, never by string-matching
-a role marker, which would shift the whole mask the moment a trace contains the
-marker as content.
+The mask is built by tokenizing the finished conversation once and locating
+assistant spans by sentinel substitution, never by diffing prefixes (which broke
+on templates like Qwen3 that rewrite the final turn) or string-matching role
+markers.
 
 ## Claiming a result
 
@@ -209,7 +210,7 @@ odydora/core.py      RecurrentCore — the shared N×N mixer
 odydora/adapter.py   attach_core() — forward hooks, per-layer state, counting
 odydora/data.py      streaming loader, assistant-only mask, chunker
 odydora/train.py     build(), train_steps(), evaluate(), checkpoint/resume
-tests/               31 tests, CPU-only, no network
+tests/               36 tests, CPU-only, no network
 tools/               notebook generator
 notebooks/           the Colab notebook
 ```

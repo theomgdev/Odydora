@@ -149,6 +149,7 @@ USE_DORA = False        # LoRA first: QDoRA dequantizes the frozen 4-bit weight 
                         # forward (2.0-2.4x slower, rank-invariant). DoRA is an S3 arm.
 RANK     = 32
 LR       = 2e-4
+RESUME   = True          # True = resume from checkpoint if present; False = start fresh from step 0
 
 STAGES = {
     "S1": dict(chunk=512,  max_trace_tokens=4096, traces=160, val_traces=40,
@@ -245,10 +246,14 @@ CKPT = f"{CKPT_DIR}/{STAGE}_{MODEL.split('/')[-1]}_N{N}s{STRIDE}.pt"
 opt = torch.optim.AdamW([p for p in model.parameters() if p.requires_grad], lr=LR)
 
 start = {"step": 0, "traces": 0, "tokens": 0}
-if os.path.exists(CKPT):
+if os.path.exists(CKPT) and RESUME:
     start = restore(model, CKPT)
     print(f"resumed: step {start['step']}, {start['tokens']:,} tokens, "
           f"trace cursor {start['traces']}")
+elif os.path.exists(CKPT) and not RESUME:
+    print(f"RESUME=False: starting fresh run from step 0 (existing checkpoint will be backed up on save)")
+else:
+    print(f"fresh run: starting from step 0 (no checkpoint found)")
 
 base_eval = evaluate(model, VAL, log_every=25, desc="baseline eval")
 print(f"step-0 held-out: {base_eval['bits_per_token']:.4f} bits/token "
@@ -270,6 +275,14 @@ try:
               f"[{fmt_time(r['elapsed'])}]", flush=True)
 except KeyboardInterrupt:
     print("\\n[interrupted by user] stopping training early and saving checkpoint...", flush=True)
+
+if os.path.exists(CKPT) and not RESUME and start["step"] == 0:
+    import datetime, shutil
+    ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    base, ext = os.path.splitext(CKPT)
+    bak = f"{base}_prefresh_bak_{ts}{ext}"
+    shutil.copy2(CKPT, bak)
+    print(f"Safety backup created: {os.path.basename(bak)}")
 
 save(model, CKPT, step=start["step"] + (rows[-1]["step"] if rows else 0),
      traces=start["traces"] + CFG["traces"], tokens=start["tokens"] +
@@ -333,7 +346,7 @@ code("""
 import datetime, glob, os, shutil, torch
 from odydora.train import restore
 
-action = "List Checkpoints"  # @param ["List Checkpoints", "Set as Active", "Inspect Checkpoint", "Rename Checkpoint", "Delete Checkpoint"]
+action = "List Checkpoints"  # @param ["List Checkpoints", "Set as Active", "Archive Active (Start Fresh)", "Inspect Checkpoint", "Rename Checkpoint", "Delete Checkpoint"]
 target_checkpoint = "S1_Qwen3-1.7B_N64s64.pt"  # @param {type:"string"}
 new_name = ""  # @param {type:"string"}
 confirm_delete = False  # @param {type:"boolean"}
@@ -388,6 +401,22 @@ elif action == "Set as Active":
             shutil.copy2(src, active_path)
             print(f"Success: set '{os.path.basename(src)}' as active checkpoint ({active_name}).")
             print("Cell 5 will resume from this checkpoint on its next run.")
+
+elif action == "Archive Active (Start Fresh)":
+    if not active_name:
+        print("Error: please run Cell 2 (Config) first to identify the active model configuration.")
+    else:
+        active_path = os.path.join(CKPT_DIR, active_name)
+        if not os.path.exists(active_path):
+            print(f"Active checkpoint '{active_name}' does not exist on Drive. You are already set for a fresh run!")
+        else:
+            ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            base, ext = os.path.splitext(active_name)
+            archived_name = f"{base}_archived_{ts}{ext}"
+            archived_path = os.path.join(CKPT_DIR, archived_name)
+            shutil.move(active_path, archived_path)
+            print(f"Success: archived '{active_name}' -> '{archived_name}'")
+            print("The active checkpoint slot is now clear. Cell 5 will start completely fresh from step 0!")
 
 elif action == "Inspect Checkpoint":
     target_path = os.path.join(CKPT_DIR, target_checkpoint.strip())

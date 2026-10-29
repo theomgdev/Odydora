@@ -468,6 +468,90 @@ elif action == "Delete Checkpoint":
         print(f"Deleted: '{target_checkpoint}' from {CKPT_DIR}")
 """, metadata={"cellView": "form"})
 
+md("""
+## 9 — Interactive Chat (Odydora Playground)
+
+Chat live with your fine-tuned model and observe its cross-layer recurrent core
+steering generation in real time. The cell streams tokens as they generate,
+maintains multi-turn conversation history, and displays the recurrent state norm
+$|s|$ carried across turns.
+""")
+
+code("""
+# @title 💬 Chat with Odydora { display-mode: "form" }
+# @markdown Enter your message and generation settings, then run the cell:
+
+user_message = "Explain why carrying a recurrent state across chunk boundaries beats standard LoRA."  # @param {type:"string"}
+system_prompt = "You are an autonomous AI coding and reasoning assistant."  # @param {type:"string"}
+max_new_tokens = 512  # @param {type:"slider", min:64, max:2048, step:64}
+temperature = 0.7  # @param {type:"slider", min:0.0, max:1.5, step:0.05}
+top_p = 0.9  # @param {type:"slider", min:0.1, max:1.0, step:0.05}
+clear_history = False  # @param {type:"boolean"}
+
+import os, torch
+from transformers import TextStreamer
+
+# 1. Manage chat session state
+if "CHAT_HISTORY" not in globals() or clear_history:
+    CHAT_HISTORY = []
+    if "model" in globals() and hasattr(model, "odydora_reset_state"):
+        model.odydora_reset_state()
+    print("[Chat history cleared and recurrent state reset.]\\n")
+
+# 2. Ensure model is loaded and ready
+if "model" not in globals() or "tok" not in globals():
+    print(f"Loading {MODEL} and active checkpoint from Drive...")
+    from odydora.train import build, restore
+    model, tok = build(MODEL, n=N, layers=LAYERS, stride=STRIDE, mix=MIX, window=WINDOW,
+                       use_dora=USE_DORA, r=RANK, four_bit=True)
+    active_ckpt = f"{CKPT_DIR}/{STAGE}_{MODEL.split('/')[-1]}_N{N}s{STRIDE}.pt"
+    if os.path.exists(active_ckpt):
+        meta = restore(model, active_ckpt)
+        print(f"Loaded weights from {os.path.basename(active_ckpt)} (step {meta.get('step', '-')})\\n")
+    else:
+        print(f"Note: no checkpoint found at {active_ckpt}; using freshly initialized model.\\n")
+
+# 3. Format prompt with the tokenizer's chat template
+messages = [{"role": "system", "content": system_prompt}]
+for turn in CHAT_HISTORY:
+    messages.append(turn)
+messages.append({"role": "user", "content": user_message})
+
+prompt_text = tok.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+device = next(model.parameters()).device
+inputs = tok(prompt_text, return_tensors="pt").to(device)
+
+print(f"User:\\n{user_message}\\n")
+print("Odydora:")
+
+streamer = TextStreamer(tok, skip_prompt=True)
+model.eval()
+
+with torch.no_grad():
+    output_ids = model.generate(
+        **inputs,
+        max_new_tokens=max_new_tokens,
+        temperature=temperature if temperature > 0 else None,
+        top_p=top_p if temperature > 0 else None,
+        do_sample=temperature > 0,
+        pad_token_id=tok.pad_token_id,
+        eos_token_id=tok.eos_token_id,
+        streamer=streamer,
+    )
+
+new_tokens = output_ids[0][inputs["input_ids"].shape[1]:]
+assistant_reply = tok.decode(new_tokens, skip_special_tokens=True).strip()
+
+CHAT_HISTORY.append({"role": "user", "content": user_message})
+CHAT_HISTORY.append({"role": "assistant", "content": assistant_reply})
+
+layers = getattr(model, "odydora_layers", ())
+if layers:
+    last_s = model.odydora_state().get(layers[-1])
+    s_norm = f"{last_s.norm().item():.3f}" if last_s is not None else "0.0"
+    print(f"\\n[Turn {len(CHAT_HISTORY)//2} | recurrent state norm |s|: {s_norm} carried to next turn]")
+""", metadata={"cellView": "form"})
+
 nb = {
     "cells": CELLS,
     "metadata": {

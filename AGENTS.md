@@ -27,7 +27,7 @@ estimate; they are a reason to measure.
 
 ## What the test suite proves, and the trap in it
 
-36 tests, CPU-only, no network, a few seconds. They build models from `config`
+43 tests, CPU-only, no network, a few seconds. They build models from `config`
 with random weights. `GPT2Config(n_layer=2)` in `tests/test_adapter.py` exists
 only to assert the shared-`W` invariant cheaply — **no pretrained GPT-2 is ever
 trained or reported, and a result on one would be worthless.**

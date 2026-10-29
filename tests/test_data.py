@@ -82,6 +82,18 @@ def test_a_chunk_with_no_supervised_token_is_dropped():
     assert chunks[0][2] is True, "the first kept chunk still starts the trace"
 
 
+def test_chunk_with_only_index_zero_supervised_is_dropped_to_prevent_nan_loss():
+    """In causal LM training, shift_labels = labels[..., 1:], dropping index 0.
+
+    If index 0 is the only supervised token in the chunk, CrossEntropyLoss receives
+    only -100, which evaluates to 0 / 0 = NaN. Dropping it prevents NaN loss spikes.
+    """
+    ids = list(range(10))
+    labels = [42] + [-100] * 9
+    chunks = list(chunk_trace(ids, labels, chunk=10, drop_unsupervised=True))
+    assert len(chunks) == 0, "chunk with only index 0 supervised must be dropped"
+
+
 def test_chunks_are_tensors_when_asked():
     tok = tokenizer()
     ids, labels = mask_assistant_turns(TRACE["messages"], tok)

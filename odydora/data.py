@@ -152,7 +152,13 @@ def chunk_trace(ids, labels, chunk, drop_unsupervised=False, as_tensor=False):
     for begin in range(0, len(ids), chunk):
         window_ids = ids[begin : begin + chunk]
         window_labels = labels[begin : begin + chunk]
-        if drop_unsupervised and all(m == IGNORE for m in window_labels):
+        # In causal LM training, shift_labels = labels[..., 1:], so position 0
+        # cannot be predicted and is dropped by the loss. A window whose only
+        # supervised token is at position 0 produces zero active targets in
+        # CrossEntropyLoss, yielding 0/0 = NaN loss. Drop it if drop_unsupervised.
+        if drop_unsupervised and (
+            len(window_labels) <= 1 or all(m == IGNORE for m in window_labels[1:])
+        ):
             continue
         is_start = not started
         started = True
@@ -174,6 +180,7 @@ def stream_traces(
     max_tokens=None,
     max_trace_tokens=None,
     skip_traces=0,
+    max_traces=None,
     streaming=True,
 ):
     """Yield (ids, labels, is_trace_start) tensors from the live corpus.
@@ -191,12 +198,14 @@ def stream_traces(
     Streams by default: ~2.55 GB of parquet across both splits, and a Colab
     session has no reason to materialize it. `max_trace_tokens` truncates
     each trace, which is how the fast first-signal stage keeps a long trace
-    affordable; `skip_traces` steps a resumed run over what it consumed.
+    affordable; `skip_traces` steps a resumed run over what it consumed;
+    `max_traces` caps the number of consumed traces for bounded stages.
     """
     from datasets import load_dataset
 
     rows = load_dataset(dataset, split=split, streaming=streaming)
     consumed = 0
+    traces_seen = 0
     for index, row in enumerate(rows):
         if index < skip_traces:
             continue
@@ -212,6 +221,9 @@ def stream_traces(
             consumed += window[0].numel()
             if max_tokens and consumed >= max_tokens:
                 return
+        traces_seen += 1
+        if max_traces and traces_seen >= max_traces:
+            return
 
 
 def describe_trace(row, tokenizer):

@@ -156,6 +156,15 @@ def train_steps(model, batches, optimizer, log_every=10, grad_accum=1, on_step=N
             on_step(step, is_trace_start, None if state_in is None else state_in.clone())
 
         out = model(input_ids=ids, labels=labels)
+        # The state already crosses the boundary detached; this is the explicit
+        # restatement so a reader does not have to trust the hook.
+        model.odydora_detach_state()
+
+        if torch.isnan(out.loss):
+            # Guard against unexpected numerical overflow: do not backprop NaN
+            # into weights and running optimizer moments.
+            continue
+
         loss = out.loss / grad_accum
         if scaler is not None:
             scaler.scale(loss).backward()
@@ -175,9 +184,6 @@ def train_steps(model, batches, optimizer, log_every=10, grad_accum=1, on_step=N
                 optimizer.step()
             optimizer.zero_grad(set_to_none=True)
 
-        # The state already crosses the boundary detached; this is the explicit
-        # restatement so a reader does not have to trust the hook.
-        model.odydora_detach_state()
         losses.append(out.loss.item())
         tokens += ids.numel()
 

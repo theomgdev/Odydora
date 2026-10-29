@@ -213,7 +213,8 @@ print(f"supervised    {statistics.mean(sup):.1%} of tokens (assistant turns only
 def batches(skip=0, limit=None, max_tokens=None):
     return stream_traces(tok, CFG["chunk"], dataset=DATASET, split=SPLIT,
                          max_trace_tokens=CFG["max_trace_tokens"],
-                         max_tokens=max_tokens, skip_traces=skip)
+                         max_tokens=max_tokens, skip_traces=skip,
+                         max_traces=limit)
 
 # Held-out traces, never held-out chunks: carried state would leak across the split.
 print(f"\\nbuilding the held-out set (skipping {CFG['traces']} training traces)", flush=True)
@@ -250,13 +251,19 @@ base_eval = evaluate(model, VAL, log_every=25, desc="baseline eval")
 print(f"step-0 held-out: {base_eval['bits_per_token']:.4f} bits/token "
       f"(tail {base_eval['tail_bits_per_token']:.4f})  <- the number to beat")
 
-stream = batches(skip=start["traces"])
+def fmt_time(seconds):
+    m, s = divmod(int(seconds), 60)
+    h, m = divmod(m, 60)
+    return f"{h:d}:{m:02d}:{s:02d}" if h else f"{m:02d}:{s:02d}"
+
+stream = batches(skip=start["traces"], limit=CFG["traces"])
 rows = []
 for r in train_steps(model, stream, opt, log_every=CFG["log_every"],
                      grad_accum=CFG["grad_accum"]):
     rows.append(r)
     print(f"  step {r['step']:>5}  loss {r['loss']:.4f}  {r['tok_s']:>7,.0f} tok/s  "
-          f"|s| {r['state_norm']:.3f}  |up| {r['up_norm']:.4f}", flush=True)
+          f"|s| {r['state_norm']:.3f}  |up| {r['up_norm']:.4f}  "
+          f"[{fmt_time(r['elapsed'])}]", flush=True)
 
 save(model, CKPT, step=start["step"] + (rows[-1]["step"] if rows else 0),
      traces=start["traces"] + CFG["traces"], tokens=start["tokens"] +

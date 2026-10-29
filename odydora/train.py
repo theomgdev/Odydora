@@ -296,9 +296,10 @@ def restore(model, path):
     # weights_only=True: the payload is only tensors and ints, so there is no
     # reason to let a checkpoint unpickle arbitrary objects.
     blob = torch.load(str(path), map_location="cpu", weights_only=True)
-    missing, unexpected = model.load_state_dict(blob["trainable"], strict=False)
-    if unexpected:
-        raise ValueError(f"checkpoint carries unknown tensors: {unexpected[:4]}")
+    if model is not None:
+        missing, unexpected = model.load_state_dict(blob["trainable"], strict=False)
+        if unexpected:
+            raise ValueError(f"checkpoint carries unknown tensors: {unexpected[:4]}")
     return {k: v for k, v in blob.items() if k != "trainable"}
 
 

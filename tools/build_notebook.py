@@ -28,10 +28,13 @@ def md(text):
     CELLS.append({"cell_type": "markdown", "metadata": {}, "source": _lines(text)})
 
 
-def code(text):
+def code(text, metadata=None):
     CELLS.append({
-        "cell_type": "code", "execution_count": None, "metadata": {},
-        "outputs": [], "source": _lines(text),
+        "cell_type": "code",
+        "execution_count": None,
+        "metadata": metadata or {},
+        "outputs": [],
+        "source": _lines(text),
     })
 
 
@@ -315,6 +318,90 @@ print(f"core budget {core_budget:,} -> adapter-only rank {rank} gives {matched:,
 print("Now re-run cells 3-6 with N=0 disabled and RANK set to this rank, then")
 print("compare tail bits/token. Same seed, same traces, same step count.")
 """)
+
+md("""
+## 8 — Checkpoint Manager (Drive)
+
+Interactive form to inspect, rename, and manage checkpoints stored in Drive
+(`CKPT_DIR`). Select an action below and run the cell.
+""")
+
+code("""
+# @title 📁 Checkpoint Manager { display-mode: "form" }
+# @markdown Select an action and specify target filenames if applicable:
+
+import datetime, glob, os, torch
+from odydora.train import restore
+
+action = "List Checkpoints"  # @param ["List Checkpoints", "Inspect Checkpoint", "Rename Checkpoint", "Delete Checkpoint"]
+target_checkpoint = "S1_Qwen3-1.7B_N64s64.pt"  # @param {type:"string"}
+new_name = ""  # @param {type:"string"}
+confirm_delete = False  # @param {type:"boolean"}
+
+os.makedirs(CKPT_DIR, exist_ok=True)
+files = sorted(glob.glob(os.path.join(CKPT_DIR, "*.pt")), key=os.path.getmtime, reverse=True)
+
+if action == "List Checkpoints":
+    if not files:
+        print(f"No .pt checkpoints found in {CKPT_DIR}")
+    else:
+        print(f"Found {len(files)} checkpoint(s) in {CKPT_DIR}:\\n")
+        print(f"{\"Filename\":<38} {\"Size\":>9}   {\"Last Modified\":<19} {\"Step\":>6} {\"Traces\":>8} {\"Tokens\":>10}")
+        print("-" * 96)
+        for f in files:
+            stat = os.stat(f)
+            size_mb = f"{stat.st_size / (1024 * 1024):.1f} MB"
+            mod = datetime.datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M:%S")
+            try:
+                meta = restore(None, f)
+                step = str(meta.get("step", "-"))
+                traces = str(meta.get("traces", "-"))
+                tokens = f"{meta.get('tokens', 0):,}" if "tokens" in meta else "-"
+            except Exception:
+                step, traces, tokens = "err", "err", "err"
+            print(f"{os.path.basename(f):<38} {size_mb:>9}   {mod:<19} {step:>6} {traces:>8} {tokens:>10}")
+
+elif action == "Inspect Checkpoint":
+    target_path = os.path.join(CKPT_DIR, target_checkpoint.strip())
+    if not os.path.exists(target_path):
+        print(f"Error: checkpoint '{target_checkpoint}' not found in {CKPT_DIR}")
+        print("Available files:", [os.path.basename(f) for f in files])
+    else:
+        blob = torch.load(target_path, map_location="cpu", weights_only=True)
+        print(f"=== Checkpoint Metadata: {os.path.basename(target_path)} ===")
+        for k, v in blob.items():
+            if k != "trainable":
+                print(f"  {k}: {v}")
+        trainable = blob.get("trainable", {})
+        total_p = sum(t.numel() for t in trainable.values())
+        print(f"\\nTrainable tensors ({len(trainable)} tensors, {total_p:,} parameters):")
+        for k, v in sorted(trainable.items()):
+            print(f"  {k:<55} {str(tuple(v.shape)):<18} {v.numel():>10,} params")
+
+elif action == "Rename Checkpoint":
+    src = os.path.join(CKPT_DIR, target_checkpoint.strip())
+    dst_name = new_name.strip()
+    if not dst_name.endswith(".pt"):
+        dst_name += ".pt"
+    dst = os.path.join(CKPT_DIR, dst_name)
+    if not os.path.exists(src):
+        print(f"Error: source '{target_checkpoint}' not found.")
+    elif os.path.exists(dst):
+        print(f"Error: target '{dst_name}' already exists.")
+    else:
+        os.rename(src, dst)
+        print(f"Renamed: {os.path.basename(src)} -> {dst_name}")
+
+elif action == "Delete Checkpoint":
+    target_path = os.path.join(CKPT_DIR, target_checkpoint.strip())
+    if not os.path.exists(target_path):
+        print(f"Error: '{target_checkpoint}' not found in {CKPT_DIR}")
+    elif not confirm_delete:
+        print(f"Safety check: tick the 'confirm_delete' checkbox to delete '{target_checkpoint}'.")
+    else:
+        os.remove(target_path)
+        print(f"Deleted: '{target_checkpoint}' from {CKPT_DIR}")
+""", metadata={"cellView": "form"})
 
 nb = {
     "cells": CELLS,

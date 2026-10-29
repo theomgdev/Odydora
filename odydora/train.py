@@ -7,6 +7,7 @@ trace, which is what lets a 50k-token document train in 1k-token pieces.
 """
 
 import json
+import os
 import time
 
 import torch
@@ -151,13 +152,107 @@ def build(
         attn_implementation=attn_implementation,
     )
     if four_bit:
-        model = prepare_model_for_kbit_training(model, use_gradient_checkpointing=True)
+        model = prepare_model_for_kbit_training(
+            model,
+            use_gradient_checkpointing=True,
+            gradient_checkpointing_kwargs={"use_reentrant": False},
+        )
     model = get_peft_model(model, lora_config(use_dora=use_dora, r=r))
     model = attach_core(
         model, n=n, layers=layers, stride=stride, mix=mix, window=window,
         freeze_base=False,
     )
     return model, tokenizer
+
+
+def configure_optimizer(model, lr=2e-4, core_lr_scale=5.0, weight_decay=0.01):
+    """Build an AdamW optimizer with OdyssNet-style parameter family separation.
+
+    Two structural asymmetries separate the shared RecurrentCore from the spatial
+    LoRA adapters:
+    1. Only connective matrices (`W`, `down`, `up`, `lora_A`, `lora_B`) decay
+       toward zero. Modulation parameters (`core.alpha`, `core.norm.weight`,
+       DoRA `lora_magnitude_vector`, biases) receive `weight_decay=0.0` because
+       zero is not their neutral point: pulling `alpha = logit(0.02)` toward 0
+       drives the mixing rate toward 0.50 (destroying long-horizon carry), and
+       pulling `norm.weight = 1.0` toward 0 shrinks the sqrt(N) state sphere.
+    2. The shared core sits behind a zero-initialised `up` projection and a
+       small convex mixing rate `a = 0.02`, so at `core_lr == lr` its weights
+       barely move in early steps (`|d mix| <= mix*(1-mix)*lr` per step).
+       Scaling the core's step size by `core_lr_scale` (and `alpha` by an
+       additional `5x` to offset the sigmoid Jacobian `mix*(1-mix) ~ 1/50`)
+       lets the recurrent pathway open alongside the spatial adapters.
+    """
+    core = getattr(model, "odydora_core", None)
+    core_ids = {id(p) for p in core.parameters()} if core is not None else set()
+
+    adapter_decay, adapter_no_decay = [], []
+    core_decay, core_no_decay, core_alpha = [], [], []
+
+    for name, param in model.named_parameters():
+        if not param.requires_grad:
+            continue
+        if id(param) in core_ids:
+            leaf = name.split(".")[-1]
+            if leaf == "alpha":
+                core_alpha.append(param)
+            elif "norm" in name or param.ndim < 2:
+                core_no_decay.append(param)
+            else:
+                core_decay.append(param)
+        elif param.ndim < 2 or "magnitude" in name or "norm" in name or "bias" in name:
+            adapter_no_decay.append(param)
+        else:
+            adapter_decay.append(param)
+
+    groups = []
+    if adapter_decay:
+        groups.append(
+            {
+                "params": adapter_decay,
+                "lr": lr,
+                "weight_decay": weight_decay,
+                "group_name": "adapter_decay",
+            }
+        )
+    if adapter_no_decay:
+        groups.append(
+            {
+                "params": adapter_no_decay,
+                "lr": lr,
+                "weight_decay": 0.0,
+                "group_name": "adapter_no_decay",
+            }
+        )
+    if core_decay:
+        groups.append(
+            {
+                "params": core_decay,
+                "lr": lr * core_lr_scale,
+                "weight_decay": weight_decay,
+                "group_name": "core_decay",
+            }
+        )
+    if core_no_decay:
+        groups.append(
+            {
+                "params": core_no_decay,
+                "lr": lr * core_lr_scale,
+                "weight_decay": 0.0,
+                "group_name": "core_no_decay",
+            }
+        )
+    if core_alpha:
+        groups.append(
+            {
+                "params": core_alpha,
+                "lr": lr * core_lr_scale * 5.0,
+                "weight_decay": 0.0,
+                "group_name": "core_alpha",
+            }
+        )
+
+    return torch.optim.AdamW(groups, lr=lr, weight_decay=weight_decay)
 
 
 def train_steps(model, batches, optimizer, log_every=10, grad_accum=1, on_step=None,
@@ -171,7 +266,7 @@ def train_steps(model, batches, optimizer, log_every=10, grad_accum=1, on_step=N
     whether the loss is falling or the run is wedged.
     """
     model.train()
-    started, tokens, began = time.time(), 0, time.time()
+    started, tokens, traces, began = time.time(), 0, 0, time.time()
     losses = []
     for step, (ids, labels, is_trace_start) in enumerate(batches):
         device = next(model.parameters()).device
@@ -179,6 +274,7 @@ def train_steps(model, batches, optimizer, log_every=10, grad_accum=1, on_step=N
 
         if is_trace_start:
             model.odydora_reset_state()
+            traces += 1
         layers = getattr(model, "odydora_layers", ())
         state_in = model.odydora_state().get(layers[0]) if layers else None
         if on_step is not None:
@@ -230,6 +326,7 @@ def train_steps(model, batches, optimizer, log_every=10, grad_accum=1, on_step=N
                 "loss": sum(losses) / len(losses),
                 "tok_s": tokens / elapsed,
                 "tokens": tokens,
+                "traces": traces,
                 "state_norm": 0.0 if state is None else state.norm().item(),
                 "up_norm": up_norm,
                 "elapsed": time.time() - started,
@@ -294,7 +391,10 @@ def save(model, path, step=0, traces=0, tokens=0, extra=None):
     }
     if extra:
         payload.update(extra)
-    torch.save(payload, str(path))
+    target = str(path)
+    tmp = f"{target}.tmp"
+    torch.save(payload, tmp)
+    os.replace(tmp, target)
     return path
 
 

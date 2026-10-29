@@ -129,3 +129,32 @@ def test_the_core_attaches_through_a_peft_wrapper():
     adapter, core_params = count_parameters(model)
     assert adapter > 0, "LoRA parameters were not counted"
     assert core_params > 0, "core parameters were not counted"
+
+
+def test_the_core_attaches_through_a_dora_wrapper():
+    """DoRA introduces magnitude vectors per linear layer.
+
+    Assert that attach_core finds decoder layers under PeftModel with use_dora=True,
+    executes both boundaries, and backprops gradients into both DoRA and the core.
+    """
+    from peft import LoraConfig, get_peft_model
+
+    torch.manual_seed(1)
+    wrapped = get_peft_model(
+        tiny_qwen(),
+        LoraConfig(
+            r=8,
+            target_modules=["q_proj", "v_proj"],
+            task_type="CAUSAL_LM",
+            use_dora=True,
+        ),
+    )
+    model = attach_core(wrapped, n=16, stride=4, freeze_base=False)
+    assert len(model.odydora_layers) == 2
+
+    ids = torch.randint(0, 128, (1, 16))
+    model.odydora_reset_state()
+    model(input_ids=ids, labels=ids).loss.backward()
+    assert model.odydora_calls() == 2
+    adapter, core_params = count_parameters(model)
+    assert adapter > 0 and core_params > 0

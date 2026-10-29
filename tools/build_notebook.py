@@ -258,12 +258,15 @@ def fmt_time(seconds):
 
 stream = batches(skip=start["traces"], limit=CFG["traces"])
 rows = []
-for r in train_steps(model, stream, opt, log_every=CFG["log_every"],
-                     grad_accum=CFG["grad_accum"]):
-    rows.append(r)
-    print(f"  step {r['step']:>5}  loss {r['loss']:.4f}  {r['tok_s']:>7,.0f} tok/s  "
-          f"|s| {r['state_norm']:.3f}  |up| {r['up_norm']:.4f}  "
-          f"[{fmt_time(r['elapsed'])}]", flush=True)
+try:
+    for r in train_steps(model, stream, opt, log_every=CFG["log_every"],
+                         grad_accum=CFG["grad_accum"]):
+        rows.append(r)
+        print(f"  step {r['step']:>5}  loss {r['loss']:.4f}  {r['tok_s']:>7,.0f} tok/s  "
+              f"|s| {r['state_norm']:.3f}  |up| {r['up_norm']:.4f}  "
+              f"[{fmt_time(r['elapsed'])}]", flush=True)
+except KeyboardInterrupt:
+    print("\\n[interrupted by user] stopping training early and saving checkpoint...", flush=True)
 
 save(model, CKPT, step=start["step"] + (rows[-1]["step"] if rows else 0),
      traces=start["traces"] + CFG["traces"], tokens=start["tokens"] +

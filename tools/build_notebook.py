@@ -195,12 +195,18 @@ code("""
 import datasets, statistics
 from odydora.data import describe_trace, stream_traces
 
+# Every long step prints as it goes. A cell that sits silent for minutes is
+# indistinguishable from a hung one, and there is no way to tell whether the
+# work is progressing or wedged.
+print("probing 10 traces for the length histogram", flush=True)
 probe = datasets.load_dataset(DATASET, split=SPLIT, streaming=True)
 lens, sup = [], []
 for i, row in enumerate(probe):
     if i >= 10: break
     d = describe_trace(row, tok)
     lens.append(d["tokens"]); sup.append(d["supervised_fraction"])
+    print(f"  trace {i+1:>2}/10  {d['tokens']:>7,} tokens  "
+          f"{d['supervised_fraction']:>5.1%} supervised", flush=True)
 print(f"tokens/trace  min {min(lens):,}  median {int(statistics.median(lens)):,}  max {max(lens):,}")
 print(f"supervised    {statistics.mean(sup):.1%} of tokens (assistant turns only)")
 
@@ -210,7 +216,12 @@ def batches(skip=0, limit=None, max_tokens=None):
                          max_tokens=max_tokens, skip_traces=skip)
 
 # Held-out traces, never held-out chunks: carried state would leak across the split.
-VAL = list(batches(skip=CFG["traces"], max_tokens=CFG["val_traces"] * 2000))
+print(f"\\nbuilding the held-out set (skipping {CFG['traces']} training traces)", flush=True)
+VAL = []
+for chunk in batches(skip=CFG["traces"], max_tokens=CFG["val_traces"] * 2000):
+    VAL.append(chunk)
+    if len(VAL) % 25 == 0:
+        print(f"  {len(VAL)} val chunks", flush=True)
 print(f"val: {len(VAL)} chunks from traces {CFG['traces']}..{CFG['traces']+CFG['val_traces']}")
 """)
 
@@ -240,15 +251,16 @@ print(f"step-0 held-out: {base_eval['bits_per_token']:.4f} bits/token "
       f"(tail {base_eval['tail_bits_per_token']:.4f})  <- the number to beat")
 
 stream = batches(skip=start["traces"])
-log = train_steps(model, stream, opt, log_every=CFG["log_every"],
-                  grad_accum=CFG["grad_accum"])
-for r in log:
+rows = []
+for r in train_steps(model, stream, opt, log_every=CFG["log_every"],
+                     grad_accum=CFG["grad_accum"]):
+    rows.append(r)
     print(f"  step {r['step']:>5}  loss {r['loss']:.4f}  {r['tok_s']:>7,.0f} tok/s  "
-          f"|s| {r['state_norm']:.3f}  |up| {r['up_norm']:.4f}")
+          f"|s| {r['state_norm']:.3f}  |up| {r['up_norm']:.4f}", flush=True)
 
-save(model, CKPT, step=start["step"] + (log[-1]["step"] if log else 0),
+save(model, CKPT, step=start["step"] + (rows[-1]["step"] if rows else 0),
      traces=start["traces"] + CFG["traces"], tokens=start["tokens"] +
-     (log[-1]["tokens"] if log else 0))
+     (rows[-1]["tokens"] if rows else 0))
 print(f"saved -> {CKPT}")
 """)
 

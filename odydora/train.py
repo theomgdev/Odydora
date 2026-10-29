@@ -134,13 +134,16 @@ def build(
 
 def train_steps(model, batches, optimizer, log_every=10, grad_accum=1, on_step=None,
                 clip=1.0, scaler=None):
-    """Train over an iterable of (ids, labels, is_trace_start) chunks.
+    """Yield one log row every `log_every` steps, as training proceeds.
 
-    Returns the log rows, so a caller can plot or record them without the
-    loop having to know about either.
+    A generator, not a list: a caller printing these gets the first line after
+    `log_every` steps instead of after the whole run. This used to return the
+    finished list, which made a Colab cell sit with no output for the entire
+    stage -- indistinguishable from a hang, and the user has no way to tell
+    whether the loss is falling or the run is wedged.
     """
     model.train()
-    log, started, tokens, began = [], time.time(), 0, time.time()
+    started, tokens, began = time.time(), 0, time.time()
     losses = []
     for step, (ids, labels, is_trace_start) in enumerate(batches):
         device = next(model.parameters()).device
@@ -181,19 +184,17 @@ def train_steps(model, batches, optimizer, log_every=10, grad_accum=1, on_step=N
         if (step + 1) % log_every == 0:
             state = model.odydora_state().get(model.odydora_layers[-1])
             elapsed = max(time.time() - began, 1e-9)
-            log.append(
-                {
-                    "step": step + 1,
-                    "loss": sum(losses) / len(losses),
-                    "tok_s": tokens / elapsed,
-                    "tokens": tokens,
-                    "state_norm": 0.0 if state is None else state.norm().item(),
-                    "up_norm": model.odydora_core.up.weight.norm().item(),
-                    "elapsed": time.time() - started,
-                }
-            )
+            row = {
+                "step": step + 1,
+                "loss": sum(losses) / len(losses),
+                "tok_s": tokens / elapsed,
+                "tokens": tokens,
+                "state_norm": 0.0 if state is None else state.norm().item(),
+                "up_norm": model.odydora_core.up.weight.detach().norm().item(),
+                "elapsed": time.time() - started,
+            }
             losses = []
-    return log
+            yield row
 
 
 @torch.no_grad()

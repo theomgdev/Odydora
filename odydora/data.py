@@ -61,19 +61,81 @@ def mask_assistant_turns(messages, tokenizer, tools=None):
     if tools:
         kwargs["tools"] = tools
 
-    ids, labels = [], []
-    previous = 0
-    for index, message in enumerate(messages):
-        rendered = tokenizer.apply_chat_template(messages[: index + 1], **kwargs)
-        encoded = tokenizer(rendered, add_special_tokens=False)["input_ids"]
-        span = encoded[previous:]
-        previous = len(encoded)
-        ids.extend(span)
-        if message.get("role") in ASSISTANT_ROLES:
-            labels.extend(span)
-        else:
-            labels.extend([IGNORE] * len(span))
+    # Tokenize the finished conversation exactly once. Diffing consecutive
+    # prefixes -- the obvious approach, and what this used to do -- is wrong
+    # for any template that rewrites an earlier turn: Qwen3 emits an empty
+    # `<think>` block for the LAST assistant turn and drops it again on the
+    # next render, so the prefix shrinks, `encoded[previous:]` slices from the
+    # wrong place, and tokens are silently lost. Measured on a 5-turn trace,
+    # the stream fed to the model read `A1<|im_end|>\n2<|im_end|>` -- the whole
+    # `<|im_start|>user\nU2` header gone and "U2" truncated to "2".
+    full = tokenizer.apply_chat_template(messages, **kwargs)
+    encoded = tokenizer(full, add_special_tokens=False, return_offsets_mapping=True)
+    ids = list(encoded["input_ids"])
+    offsets = encoded["offset_mapping"]
+
+    spans = _assistant_char_spans(messages, tokenizer, kwargs, full)
+    labels = [IGNORE] * len(ids)
+    for begin, end in spans:
+        for position, (start, stop) in enumerate(offsets):
+            if stop > start and start >= begin and stop <= end:
+                labels[position] = ids[position]
     return ids, labels
+
+
+# A string the corpus cannot contain: NULs are illegal in JSON text, so a trace
+# can never carry one and no amount of crafted content can collide with it.
+_SENTINEL = "\x00odydora-span\x00"
+
+
+def _assistant_char_spans(messages, tokenizer, kwargs, full):
+    """[(begin, end)] char spans of each assistant turn inside `full`.
+
+    Found by substitution, never by searching for a role marker. Rendering the
+    conversation with one turn's content replaced by a sentinel says exactly
+    where that turn's text begins, because every earlier turn is untouched, and
+    the length difference against `full` says how long the real text was. A
+    trace whose own content contains `<|im_start|>assistant` -- which the
+    template renders verbatim, and which tokenizes to the same special id as
+    the real marker, so no token-level search can tell them apart -- therefore
+    cannot shift the mask.
+
+    The sentinel sits where the turn's rendered body starts, which puts any
+    `<think>` block the template emits inside the supervised span. That is
+    deliberate: the reasoning is what this project trains.
+    """
+    starts = []
+    for index in range(len(messages)):
+        probe = [dict(turn) for turn in messages]
+        probe[index] = dict(probe[index])
+        probe[index]["content"] = _SENTINEL
+        rendered = tokenizer.apply_chat_template(probe, **kwargs)
+        position = rendered.find(_SENTINEL)
+        if position < 0:
+            # The template dropped this turn's content entirely, so there is
+            # nothing of it in `full` to supervise.
+            starts.append((index, None, None))
+            continue
+        # Only this turn's body differs between the two renders.
+        body = len(full) - (len(rendered) - len(_SENTINEL))
+        starts.append((index, position, body))
+
+    spans = []
+    for order, (index, position, body) in enumerate(starts):
+        if position is None or messages[index].get("role") not in ASSISTANT_ROLES:
+            continue
+        end = position + max(body, 0)
+        # Extend over the turn's closing markers, which are template output and
+        # so cannot be spoofed by content: stop at the next turn's body.
+        following = next(
+            (p for _, p, _ in starts[order + 1 :] if p is not None), len(full)
+        )
+        tail = full[end:following]
+        cut = tail.rfind("<|im_end|>")
+        if cut >= 0:
+            end += cut + len("<|im_end|>")
+        spans.append((position, end))
+    return spans
 
 
 def chunk_trace(ids, labels, chunk, drop_unsupervised=False, as_tensor=False):

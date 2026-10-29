@@ -65,7 +65,7 @@ def test_training_moves_the_core_and_the_loss():
     core = model.odydora_core
     before = core.W.detach().clone()
     opt = torch.optim.AdamW([p for p in model.parameters() if p.requires_grad], lr=0.05)
-    log = train_steps(model, batches(), opt, log_every=2)
+    log = list(train_steps(model, batches(), opt, log_every=2))
     assert len(log) == 3, f"expected 3 log rows, got {len(log)}"
     assert not torch.equal(before, core.W), "W never moved"
     assert log[0]["loss"] != log[-1]["loss"], "loss never changed"
@@ -79,8 +79,11 @@ def test_state_resets_on_a_trace_start_and_carries_otherwise():
     model = attach_core(tiny_qwen(), n=16, layers=(0, 1), stride=4)
     opt = torch.optim.SGD([p for p in model.parameters() if p.requires_grad], lr=0.0)
     seen = []
-    train_steps(model, batches(count=4), opt, log_every=1,
-                on_step=lambda i, start, state: seen.append((start, state)))
+    # Must be consumed: train_steps is a generator, so an un-drained call runs
+    # no steps at all and this test would pass on an empty `seen`.
+    list(train_steps(model, batches(count=4), opt, log_every=1,
+                     on_step=lambda i, start, state: seen.append((start, state))))
+    assert len(seen) == 4, f"expected 4 steps, got {len(seen)}"
     assert seen[0][0] is True
     # A trace start must reset, so the state entering a start chunk is fresh.
     assert seen[0][1] is None or torch.count_nonzero(seen[0][1]) == 0

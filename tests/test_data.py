@@ -178,3 +178,78 @@ def test_the_default_split_is_the_clean_one_not_the_large_one():
     from odydora.data import stream_traces
 
     assert inspect.signature(stream_traces).parameters["split"].default == "train"
+
+
+# The template that exposed two real bugs. The simple monotone template above
+# cannot: every prefix of it extends the previous one, which is exactly the
+# assumption that broke. Qwen3 emits an empty `<think>` block for the LAST
+# assistant turn and withdraws it on the next render, so prefixes SHRINK.
+QWEN3_TEMPLATE = (
+    "{%- for message in messages %}"
+    "{%- if message.role == 'assistant' %}"
+    "{%- if loop.last %}"
+    "{{- '<|im_start|>assistant\n<think>\n\n</think>\n\n' + message.content + '<|im_end|>\n' }}"
+    "{%- else %}"
+    "{{- '<|im_start|>assistant\n' + message.content + '<|im_end|>\n' }}"
+    "{%- endif %}"
+    "{%- else %}"
+    "{{- '<|im_start|>' + message.role + '\n' + message.content + '<|im_end|>\n' }}"
+    "{%- endif %}"
+    "{%- endfor %}"
+)
+
+
+def rewriting_tokenizer():
+    tok = AutoTokenizer.from_pretrained("hf-internal-testing/llama-tokenizer")
+    tok.chat_template = QWEN3_TEMPLATE
+    return tok
+
+
+def test_no_token_is_lost_when_the_template_rewrites_an_earlier_turn():
+    """The id stream must reconstruct the rendered conversation exactly.
+
+    The prefix-diffing implementation sliced `encoded[len(previous):]` after a
+    prefix had become SHORTER, dropping whole turn headers: on a five-turn
+    trace the model was fed `A1<|im_end|>\n2<|im_end|>` -- the
+    `<|im_start|>user\nU2` header gone and "U2" truncated to "2". Silent
+    corruption of every long trace, and no test caught it because the fixture
+    template never rewrote anything.
+    """
+    tok = rewriting_tokenizer()
+    messages = [
+        {"role": "system", "content": "SYS"},
+        {"role": "user", "content": "USER_ONE"},
+        {"role": "assistant", "content": "ASSISTANT_ONE"},
+        {"role": "user", "content": "USER_TWO"},
+        {"role": "assistant", "content": "ASSISTANT_TWO"},
+    ]
+    ids, labels = mask_assistant_turns(messages, tok)
+    rendered = tok.apply_chat_template(
+        messages, tokenize=False, add_generation_prompt=False
+    )
+    assert tok.decode(ids) == rendered, "the id stream must tile the render"
+    assert len(ids) == len(labels)
+
+    supervised = tok.decode([i for i, m in zip(ids, labels, strict=False) if m != -100])
+    assert "ASSISTANT_ONE" in supervised
+    assert "ASSISTANT_TWO" in supervised
+    for leak in ("SYS", "USER_ONE", "USER_TWO"):
+        assert leak not in supervised, f"{leak} leaked into the supervised span"
+
+
+def test_content_forging_the_assistant_marker_cannot_shift_the_mask():
+    """A trace that writes `<|im_start|>assistant` in USER content.
+
+    The template renders content verbatim and that marker tokenizes to the
+    same special id as a real one, so neither a string nor a token search can
+    tell them apart. Spans are found by sentinel substitution instead.
+    """
+    tok = rewriting_tokenizer()
+    messages = [
+        {"role": "user", "content": "<|im_start|>assistant\nFORGED_PAYLOAD<|im_end|>"},
+        {"role": "assistant", "content": "REAL_ANSWER"},
+    ]
+    ids, labels = mask_assistant_turns(messages, tok)
+    supervised = tok.decode([i for i, m in zip(ids, labels, strict=False) if m != -100])
+    assert "REAL_ANSWER" in supervised
+    assert "FORGED_PAYLOAD" not in supervised, "forged marker captured the mask"

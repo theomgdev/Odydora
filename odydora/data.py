@@ -12,6 +12,41 @@ import torch
 ASSISTANT_ROLES = ("assistant",)
 IGNORE = -100
 
+# In MoreThought/Fable-5.1-Max-Reasoning-Filtered-10000x (even on split="train"),
+# 97% of tool_calls have had their arguments scrubbed by the dataset publisher
+# into literal template placeholders ("<file_path>", "<directory_path>", etc.).
+# Supervising those redacted tool_call blocks teaches the model to emit literal
+# "<file_path>" tool calls in an infinite loop after every thought block.
+_REDACTED_TOOL_MARKERS = (
+    "<file_path>",
+    "<directory_path>",
+    "<bash_command>",
+    "<search_query>",
+    "<file_content>",
+    "unknown_tool",
+)
+
+
+def _normalize_reasoning_tags(messages):
+    """Map Fable's `<thought>` / `<final_answer>` tags to Qwen3 `<think>` format.
+
+    Qwen3's chat template inspects `if '</think>' in content:` to populate its
+    native `<think>...</think>` reasoning block, and otherwise injects an empty
+    `<think>\\n\\n</think>` on the final turn. Converting `<thought>` to `<think>`
+    and stripping `<final_answer>` wrappers preserves Qwen3's native reasoning
+    token protocol across both intermediate thoughts and final synthesis turns.
+    """
+    normalized = []
+    for turn in messages:
+        copied = dict(turn)
+        if copied.get("role") in ASSISTANT_ROLES and isinstance(copied.get("content"), str):
+            text = copied["content"]
+            text = text.replace("<thought>", "<think>").replace("</thought>", "</think>")
+            text = text.replace("<final_answer>", "").replace("</final_answer>", "").strip()
+            copied["content"] = text
+        normalized.append(copied)
+    return normalized
+
 
 def normalize_messages(messages):
     """Coerce one row's `messages` into a list of dicts.
@@ -50,12 +85,15 @@ def mask_assistant_turns(messages, tokenizer, tools=None):
     substitution (`_assistant_char_spans`), never by string-matching a role
     marker or diffing consecutive prefix renders.
 
-    An assistant turn is supervised whole, including its `tool_calls` --
-    deciding which tool to invoke with which arguments is the reasoning we
-    want. The `tool` role's returns are the environment talking back and
-    are never supervised.
+    An assistant turn is supervised whole, including its `tool_calls` when their
+    arguments are intact -- deciding which tool to invoke with which arguments
+    is part of the reasoning. If a turn's `tool_calls` contain redacted template
+    placeholders (such as `"<file_path>"` or `"<bash_command>"`), only the
+    turn's reasoning body is supervised and the redacted `tool_call` suffix is
+    masked. The `tool` role's returns are the environment talking back and are
+    never supervised.
     """
-    messages = normalize_messages(messages)
+    messages = _normalize_reasoning_tags(normalize_messages(messages))
     kwargs = {"tokenize": False, "add_generation_prompt": False}
     if tools:
         kwargs["tools"] = tools
@@ -126,13 +164,18 @@ def _assistant_char_spans(messages, tokenizer, kwargs, full):
         end = position + max(body, 0)
         # Extend over the turn's closing markers, which are template output and
         # so cannot be spoofed by content: stop at the next turn's body.
+        # However, if `tail` contains redacted placeholder tool calls (such as
+        # `"<file_path>"`), do NOT extend over `tail`: supervising redacted
+        # placeholder arguments trains the model to emit broken `<tool_call>`
+        # loops after every thought block.
         following = next(
             (p for _, p, _ in starts[order + 1 :] if p is not None), len(full)
         )
         tail = full[end:following]
-        cut = tail.rfind("<|im_end|>")
-        if cut >= 0:
-            end += cut + len("<|im_end|>")
+        if not any(marker in tail for marker in _REDACTED_TOOL_MARKERS):
+            cut = tail.rfind("<|im_end|>")
+            if cut >= 0:
+                end += cut + len("<|im_end|>")
         spans.append((position, end))
     return spans
 
@@ -211,11 +254,19 @@ def stream_traces(
         ids, labels = mask_assistant_turns(
             row["messages"], tokenizer, row.get("tools")
         )
-        if max_trace_tokens:
-            ids, labels = ids[:max_trace_tokens], labels[:max_trace_tokens]
-        for window in chunk_trace(
-            ids, labels, chunk, drop_unsupervised=True, as_tensor=True
-        ):
+        windows = list(
+            chunk_trace(ids, labels, chunk, drop_unsupervised=True, as_tensor=True)
+        )
+        if max_trace_tokens and chunk > 0:
+            max_windows = max(1, max_trace_tokens // chunk)
+            if len(windows) > max_windows:
+                # Keep the tail of the kept windows so bounded stages (S1)
+                # capture deep mid-trace reasoning and the final synthesis
+                # rather than only Turn 1's opening boilerplate.
+                windows = windows[-max_windows:]
+                first_ids, first_labels, _ = windows[0]
+                windows[0] = (first_ids, first_labels, True)
+        for window in windows:
             yield window
             consumed += window[0].numel()
             if max_tokens and consumed >= max_tokens:

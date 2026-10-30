@@ -137,7 +137,7 @@ git clone https://github.com/theomgdev/Odydora
 cd Odydora
 python -m venv .venv && .venv/Scripts/activate   # or source .venv/bin/activate
 pip install -e ".[dev]"
-pytest -q                                        # 43 tests, CPU, no downloads
+pytest -q                                        # 45 tests, CPU, no downloads
 ```
 
 ## Use
@@ -200,12 +200,18 @@ tail. **Only 10.1% of tokens are supervised** (assistant turns inside a trace
 that is mostly tool output), so a token budget is tokens *seen*, not tokens
 *learned from*.
 
-Loss is computed on assistant turns only — including their `tool_calls`, since
-choosing the tool and its arguments is the reasoning being trained. The `tool`
-role's returns are the environment talking back and stay masked. The mask is
-built by tokenizing the finished conversation once and locating assistant spans
-by sentinel substitution, never by diffing prefixes (which broke on templates
-like Qwen3 that rewrite the final turn) or string-matching role markers.
+Loss is computed on assistant turns only — including their `tool_calls` when
+their arguments are intact, while masking redacted template placeholders (such
+as `"<file_path>"` or `"<bash_command>"`) and mapping `<thought>` /
+`<final_answer>` tags to Qwen3's native `<think>...</think>` protocol. The
+`tool` role's returns are the environment talking back and stay masked. The
+mask is built by tokenizing the finished conversation once and locating
+assistant spans by sentinel substitution, never by diffing prefixes (which
+broke on templates like Qwen3 that rewrite the final turn) or string-matching
+role markers. When `max_trace_tokens` bounds a stage, it caps the *kept*
+supervised windows from the tail of each trace so bounded runs train on deep
+mid-trace reasoning and the final synthesis rather than only Turn 1's opening
+boilerplate.
 
 ## Claiming a result
 
@@ -235,11 +241,13 @@ learning rate $2\times 10^{-4}$, and AdamW.
 | Architecture | Trainable Parameters | Held-out Loss (bits/tok) | Held-out Perplexity | Tail 25% Loss (bits/tok) | Tail Perplexity |
 |---|---|---|---|---|---|
 | **Base Frozen Model (Step 0)** | 0 | 3.3280 | 10.04 | 2.8729 | 7.33 |
-| **Matched LoRA Control Arm ($r=1$)** | 1,089,536 | 1.1160 | 2.17 | 0.9662 | 1.95 |
-| **Odydora Recurrent Core ($N=64$)** | **266,241** | **0.2186** | **1.16** | **0.2441** | **1.18** |
-| *Odydora Advantage* | **-75.6% fewer parameters** | **-0.8974 bits** | **-46.5% perplexity** | **-0.7221 bits** | **-39.5% perplexity** |
+| **Matched LoRA Control Arm ($r=1$, 220 steps)** | 1,089,536 | 1.1160 | 2.17 | 0.9662 | 1.95 |
+| **Matched LoRA Control Arm ($r=1$, 440 steps / 2× pass)** | 1,089,536 | 0.4923 | 1.41 | 0.4046 | 1.32 |
+| **Odydora Recurrent Core ($N=64$, 220 steps, flat AdamW)** | **266,241** | 0.2186 | 1.16 | 0.2441 | 1.18 |
+| **Odydora Recurrent Core ($N=64$, 220 steps, `configure_optimizer`)** | **266,241** | **0.2026** | **1.15** | **0.2094** | **1.16** |
+| *Odydora Advantage (at 220 steps)* | **-75.6% fewer parameters** | **-0.9134 bits** | **-47.0% perplexity** | **-0.7568 bits** | **-40.5% perplexity** |
 
-*(On longer carry runs through 790 chunks, Odydora's tail loss further drops to **0.0057 bits/token**, corresponding to 1.004 perplexity).*
+*(Even when the 4.1× larger LoRA control arm is given a second full 220-chunk pass — 440 steps total — it plateaus at 0.4923 overall / 0.4046 tail, whereas Odydora reaches **0.2026 overall / 0.2094 tail** in a single 220-step pass (`mix` adapting to `0.0195`, `|up|` reaching `2.3283`), and **0.0057 bits/token** on 790-chunk carry runs).*
 
 #### Why the gap exists: the memory ceiling
 

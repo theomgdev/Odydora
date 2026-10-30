@@ -268,3 +268,94 @@ def test_content_forging_the_assistant_marker_cannot_shift_the_mask():
     supervised = tok.decode([i for i, m in zip(ids, labels, strict=False) if m != -100])
     assert "REAL_ANSWER" in supervised
     assert "FORGED_PAYLOAD" not in supervised, "forged marker captured the mask"
+
+
+def test_redacted_placeholder_tool_calls_are_masked_while_thought_is_normalized():
+    """Fable-5.1 split='train' scrubs 97% of tool_call arguments to '<file_path>'.
+
+    Supervising those redacted suffixes teaches the model to emit literal
+    '<file_path>' tool calls in an infinite loop. Verify that `<thought>` is
+    normalized to `<think>`, `<final_answer>` wrappers are stripped, and
+    redacted `<file_path>` tool calls are masked out (`-100`).
+    """
+    tok = tokenizer()
+    tok.chat_template = (
+        "{% for m in messages %}<|im_start|>{{ m['role'] }}\n{{ m['content'] }}"
+        "{% if m.get('tool_calls') %}{% for c in m['tool_calls'] %}"
+        "<tool_call>{{ c['function']['name'] }} {{ c['function']['arguments'] }}"
+        "</tool_call>{% endfor %}{% endif %}<|im_end|>\n{% endfor %}"
+    )
+    trace = [
+        {"role": "user", "content": "Explain why recurrent state carry works."},
+        {
+            "role": "assistant",
+            "content": "<thought>\nChecking the state equation first.\n</thought>",
+            "tool_calls": [
+                {
+                    "id": "call_0",
+                    "type": "function",
+                    "function": {
+                        "name": "read_file",
+                        "arguments": '{"path": "<file_path>"}',
+                    },
+                }
+            ],
+        },
+        {
+            "role": "tool",
+            "content": "FILE DUMP",
+            "tool_call_id": "call_0",
+            "name": "read_file",
+        },
+        {
+            "role": "assistant",
+            "content": "<final_answer>\nState carry preserves context.\n</final_answer>",
+        },
+    ]
+    ids, labels = mask_assistant_turns(trace, tok)
+    supervised = tok.decode([i for i, m in zip(ids, labels, strict=False) if m != -100])
+    assert "<think>" in supervised
+    assert "Checking the state equation first." in supervised
+    assert "State carry preserves context." in supervised
+    assert "<thought>" not in supervised
+    assert "<final_answer>" not in supervised
+    assert "<file_path>" not in supervised
+    assert "FILE DUMP" not in supervised
+
+
+def test_stream_traces_max_trace_tokens_keeps_tail_supervised_windows(monkeypatch):
+    """Slicing raw `ids[:max_trace_tokens]` before `drop_unsupervised=True`
+    wasted 90% of the budget on dropped `tool` returns and discarded the trace's
+    `<final_answer>`. Verify `max_trace_tokens` caps the kept windows and
+    retains the tail synthesis with `is_trace_start=True` on the first window.
+    """
+    import datasets
+
+    from odydora.data import stream_traces
+
+    tok = tokenizer()
+    fake_rows = [
+        {
+            "messages": [
+                {"role": "user", "content": " ".join(["LONG_TOOL_DUMP"] * 80)},
+                {"role": "assistant", "content": "EARLY_BOILERPLATE_TURN"},
+                {"role": "user", "content": " ".join(["MORE_TOOL_OUTPUT"] * 80)},
+                {"role": "assistant", "content": "FINAL_SYNTHESIS_ANSWER"},
+            ],
+            "tools": None,
+        }
+    ]
+    monkeypatch.setattr(datasets, "load_dataset", lambda *a, **kw: fake_rows)
+    windows = list(stream_traces(tok, chunk=32, max_trace_tokens=32))
+    assert len(windows) == 1
+    w_ids, w_lbls, is_start = windows[0]
+    assert is_start is True
+    sup = tok.decode(
+        [
+            i
+            for i, m in zip(w_ids[0].tolist(), w_lbls[0].tolist(), strict=False)
+            if m != -100
+        ]
+    )
+    assert "FINAL_SYNTHESIS_ANSWER" in sup
+    assert "EARLY_BOILERPLATE_TURN" not in sup

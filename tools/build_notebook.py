@@ -152,11 +152,11 @@ LR       = 2e-4
 RESUME   = True          # True = resume from checkpoint if present; False = start fresh from step 0
 
 STAGES = {
-    "S1": dict(chunk=512,  max_trace_tokens=4096, traces=160, val_traces=40,
+    "S1": dict(chunk=512,  max_trace_tokens=4096, max_tokens=112_640, traces=160, val_traces=40,
                grad_accum=8,  log_every=10, save_every_s=900),
-    "S2": dict(chunk=1024, max_trace_tokens=None, traces=2000, val_traces=50,
+    "S2": dict(chunk=1024, max_trace_tokens=None, max_tokens=None,    traces=2000, val_traces=50,
                grad_accum=16, log_every=25, save_every_s=900),
-    "S3": dict(chunk=1024, max_trace_tokens=None, traces=5000, val_traces=50,
+    "S3": dict(chunk=1024, max_trace_tokens=None, max_tokens=None,    traces=5000, val_traces=50,
                grad_accum=16, log_every=50, save_every_s=900),
 }
 CFG = STAGES[STAGE]
@@ -175,10 +175,11 @@ the parameter-efficiency numerator — check the base really is frozen.
 """)
 
 code("""
-from odydora.train import build, report
+from odydora.train import build, report, trainable_state
 
 model, tok = build(MODEL, n=N, layers=LAYERS, stride=STRIDE, mix=MIX, window=WINDOW,
                    use_dora=USE_DORA, r=RANK, four_bit=True)
+_INIT_STATE = {k: v.detach().cpu().clone() for k, v in trainable_state(model).items()}
 
 rows = report(model)
 print(f"total       {rows['total']:>14,}")
@@ -217,7 +218,8 @@ print(f"supervised    {statistics.mean(sup):.1%} of tokens (assistant turns only
 def batches(skip=0, limit=None, max_tokens=None):
     return stream_traces(tok, CFG["chunk"], dataset=DATASET, split=SPLIT,
                          max_trace_tokens=CFG["max_trace_tokens"],
-                         max_tokens=max_tokens, skip_traces=skip,
+                         max_tokens=max_tokens if max_tokens is not None else CFG.get("max_tokens"),
+                         skip_traces=skip,
                          max_traces=limit)
 
 # Held-out traces, never held-out chunks: carried state would leak across the split.
@@ -243,8 +245,6 @@ import itertools, time, torch
 from odydora.train import configure_optimizer, evaluate, restore, save, train_steps
 
 CKPT = f"{CKPT_DIR}/{STAGE}_{MODEL.split('/')[-1]}_N{N}s{STRIDE}.pt"
-opt = configure_optimizer(model, lr=LR)
-
 start = {"step": 0, "traces": 0, "tokens": 0}
 if os.path.exists(CKPT) and RESUME:
     start = restore(model, CKPT)
@@ -256,9 +256,20 @@ elif os.path.exists(CKPT) and not RESUME:
     base, ext = os.path.splitext(CKPT)
     bak = f"{base}_prefresh_bak_{ts}{ext}"
     shutil.copy2(CKPT, bak)
-    print(f"RESUME=False: backed up existing checkpoint -> {os.path.basename(bak)}")
+    if "_INIT_STATE" in globals():
+        model.load_state_dict(_INIT_STATE, strict=False)
+    if hasattr(model, "odydora_reset_state"):
+        model.odydora_reset_state()
+    print(f"RESUME=False: backed up existing checkpoint -> {os.path.basename(bak)} and reset model to step 0")
 else:
+    if "_INIT_STATE" in globals():
+        model.load_state_dict(_INIT_STATE, strict=False)
+    if hasattr(model, "odydora_reset_state"):
+        model.odydora_reset_state()
     print(f"fresh run: starting from step 0 (no checkpoint found)")
+
+# Configure optimizer AFTER restoring/resetting weights so AdamW moments start fresh
+opt = configure_optimizer(model, lr=LR)
 
 base_eval = evaluate(model, VAL, log_every=25, desc="baseline eval")
 print(f"step-0 held-out: {base_eval['bits_per_token']:.4f} bits/token "
@@ -429,8 +440,12 @@ elif action == "Archive Active (Start Fresh)":
             archived_name = f"{base}_archived_{ts}{ext}"
             archived_path = os.path.join(CKPT_DIR, archived_name)
             shutil.move(active_path, archived_path)
+            if "model" in globals() and "_INIT_STATE" in globals():
+                model.load_state_dict(_INIT_STATE, strict=False)
+                if hasattr(model, "odydora_reset_state"):
+                    model.odydora_reset_state()
             print(f"Success: archived '{active_name}' -> '{archived_name}'")
-            print("The active checkpoint slot is now clear. Cell 5 will start completely fresh from step 0!")
+            print("The active checkpoint slot is now clear and in-memory weights are reset. Cell 5 will start completely fresh from step 0!")
 
 elif action == "Inspect Checkpoint":
     target_path = os.path.join(CKPT_DIR, target_checkpoint.strip())
@@ -471,7 +486,13 @@ elif action == "Delete Checkpoint":
         print(f"Safety check: tick the 'confirm_delete' checkbox to delete '{target_checkpoint}'.")
     else:
         os.remove(target_path)
-        print(f"Deleted: '{target_checkpoint}' from {CKPT_DIR}")
+        if active_name and os.path.basename(target_path) == active_name and "model" in globals() and "_INIT_STATE" in globals():
+            model.load_state_dict(_INIT_STATE, strict=False)
+            if hasattr(model, "odydora_reset_state"):
+                model.odydora_reset_state()
+            print(f"Deleted: '{target_checkpoint}' from {CKPT_DIR} (and reset in-memory model to step 0)")
+        else:
+            print(f"Deleted: '{target_checkpoint}' from {CKPT_DIR}")
 """, metadata={"cellView": "form"})
 
 md("""
@@ -488,7 +509,7 @@ code("""
 # @markdown Enter your message and generation settings, then run the cell:
 
 user_message = "Explain why carrying a recurrent state across chunk boundaries beats standard LoRA."  # @param {type:"string"}
-system_prompt = "You are an autonomous AI coding and reasoning assistant."  # @param {type:"string"}
+system_prompt = "You are a helpful AI assistant. Reason step by step inside <think>...</think> tags, then give a clear, direct answer."  # @param {type:"string"}
 compare_without_odydora = False  # @param {type:"boolean"}
 unlimited_tokens = True  # @param {type:"boolean"}
 max_new_tokens = 512  # @param {type:"slider", min:64, max:4096, step:64}
@@ -557,6 +578,9 @@ with torch.no_grad():
         temperature=temperature if temperature > 0 else None,
         top_p=top_p if temperature > 0 else None,
         do_sample=temperature > 0,
+        repetition_penalty=1.1,
+        stop_strings=["</tool_call>", "<|im_end|>"],
+        tokenizer=tok,
         pad_token_id=tok.pad_token_id,
         eos_token_id=tok.eos_token_id,
         streamer=streamer,
@@ -580,6 +604,9 @@ if compare_without_odydora:
             temperature=temperature if temperature > 0 else None,
             top_p=top_p if temperature > 0 else None,
             do_sample=temperature > 0,
+            repetition_penalty=1.1,
+            stop_strings=["</tool_call>", "<|im_end|>"],
+            tokenizer=tok,
             pad_token_id=tok.pad_token_id,
             eos_token_id=tok.eos_token_id,
             streamer=streamer_base,

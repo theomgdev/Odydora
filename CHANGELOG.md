@@ -37,8 +37,20 @@ the first real 4-bit call while every unit test stayed green.
 
 - **Empirical proof on `Qwen/Qwen3-1.7B` (Colab Tesla T4, 157 held-out chunks):**
   Odydora (`N=64`, 266,241 core params) reached 0.2186 bits/token overall (tail
-  0.2441, and 0.0057 over 790 chunks) against 1.1160 overall (tail 0.9662) for
-  the matched-rank LoRA control arm (`N=0, r=1`, 1,089,536 params, 4.1× larger).
+  0.2441) under flat AdamW and **0.2026 overall (tail 0.2094)** with
+  `configure_optimizer()` (`mix` adapting to 0.0195, `|up|` reaching 2.3283, and
+  0.0057 over 790 chunks) against 1.1160 overall (tail 0.9662) at 220 steps (and
+  0.4923 overall / 0.4046 tail at 440 steps / 2× pass) for the matched-rank LoRA
+  control arm (`N=0, r=1`, 1,089,536 params, 4.1× larger).
+- **Corpus reasoning-tag alignment and redacted tool-call masking.** In
+  `Fable-5.1` (`split="train"`), 97% of `tool_calls` carry redacted placeholder
+  arguments (`"<file_path>"`, `"<directory_path>"`, etc.), and intermediate
+  reasoning uses `<thought>` rather than Qwen3's `<think>`. `mask_assistant_turns`
+  now maps `<thought>` / `<final_answer>` to Qwen3's native `<think>` protocol
+  and masks redacted `tool_call` suffixes; `stream_traces` applies
+  `max_trace_tokens` to the kept supervised windows (retaining the tail
+  synthesis) rather than slicing raw `ids[:max_trace_tokens]` before dropping
+  unsupervised tool outputs.
 - **`configure_optimizer()` with parameter family separation.** Following
   OdyssNet's `ChaosGrad` policy, modulation parameters (`core.alpha`,
   `core.norm.weight`, DoRA `lora_magnitude_vector`) get `weight_decay=0.0` so

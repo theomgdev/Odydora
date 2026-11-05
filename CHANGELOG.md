@@ -1,6 +1,11 @@
 # Changelog
 
-## 0.2.0 — unreleased
+Versions are tagged (`v0.1.0`, `v0.2.0`, ...) so a number quoted from this
+project can be traced to the exact code that produced it. The Colab badge
+tracks `main`, so the notebook a reader opens is always the current one —
+a tag is the fixed reference point, not the moment of availability.
+
+## 0.2.0 — 2026-11-06
 
 The project's question changed. Up to 0.1.0 it asked whether a shared recurrent
 core helps a frozen host learn a fixed corpus. It now asks a sharper one:
@@ -70,7 +75,7 @@ validation slice (`skip_traces=160`) shares its base trajectory with the
 training slice. That is why distillation replaced it rather than supplementing
 it.
 
-## 0.1.0 — unreleased
+## 0.1.0 — 2026-10-30
 
 First working version: a shared `N × N` recurrent core attached to a frozen
 4-bit language model as a parameter-efficient adapter, with the Colab notebook

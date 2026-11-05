@@ -1,7 +1,7 @@
 cff-version: 1.2.0
 message: "If you use Odydora in your research, please cite it as below — and cite OdyssNet, whose architecture this builds on (listed under `references`)."
 title: "Odydora: a shared cross-layer recurrent core as a parameter-efficient adapter"
-abstract: "Odydora inserts a single N x N recurrent matrix, shared by every decoder layer of a frozen 4-bit language model, carrying state across layers and across chunk boundaries so that documents far longer than the context window train in fixed-size pieces. The core mechanism — one shared matrix with a hard-zero diagonal under per-step RMSNorm, with the state detached at call boundaries — is taken from OdyssNet; Odydora adapts it to steer a frozen pretrained host at segment rate, adding a convex state mix because per-step normalisation alone forgets completely over thousands of steps."
+abstract: "Odydora inserts a single N x N recurrent matrix, shared by every decoder layer of a frozen 4-bit language model, carrying state across layers and across chunk boundaries so that documents far longer than the context window train in fixed-size pieces. The core mechanism — one shared matrix with a hard-zero diagonal under per-step RMSNorm, with the state detached at call boundaries — is taken from OdyssNet; Odydora adapts it to steer a frozen pretrained host at segment rate, adding a convex state mix because per-step normalisation alone forgets completely over thousands of steps. The project asks whether temporal depth buys parameter efficiency that spatial adapters cannot: how much of a larger model's next-token distribution a small frozen host can recover from about a million trainable parameters of shared recurrence, measured as KL to the teacher in bits per token against a matched-parameter adapter-only control arm."
 authors:
   - family-names: Karahan
     given-names: Cahit
@@ -9,8 +9,8 @@ authors:
 url: "https://github.com/theomgdev/Odydora"
 repository-code: "https://github.com/theomgdev/Odydora"
 license: MIT
-version: 0.1.0
-date-released: "2026-10-29"
+version: 0.2.0
+date-released: "2026-11-06"
 keywords:
   - "parameter-efficient fine-tuning"
   - "lora"

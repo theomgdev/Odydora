@@ -27,7 +27,7 @@ estimate; they are a reason to measure.
 
 ## What the test suite proves, and the trap in it
 
-45 tests, CPU-only, no network, a few seconds. They build models from `config`
+61 tests, CPU-only, no network, a few seconds. They build models from `config`
 with random weights. `GPT2Config(n_layer=2)` in `tests/test_adapter.py` exists
 only to assert the shared-`W` invariant cheaply — **no pretrained GPT-2 is ever
 trained or reported, and a result on one would be worthless.**
@@ -57,6 +57,19 @@ measurement, which is in the README:
   attribute dispatch.
 - `mix` is a clamped logit — `sigmoid` saturates to exactly 1.0 in float32 and
   a mix of 1 drops the carried state.
+- Only the **last** factor on the output path (`up.weight`) is zeroed, including
+  when `proj_rank` factors the projections. Zeroing `up_in` as well puts a zero
+  in every factor's gradient and the core never leaves the origin.
+- The distillation KL carries a **lumped remainder term** alongside the
+  teacher's top-`k`. Dropping it renormalises over the subset, so the loss is
+  non-zero for a student that matches its teacher exactly — a floor the optimum
+  cannot reach. `kl_when_equal` is asserted to be 0.0 for exactly this reason.
+- `check_vocab_match` is a precondition, not a courtesy. A per-token KL across
+  two different tokenizers is undefined and trains the student toward noise with
+  a healthy-looking loss curve.
+- `kept_fraction` and `hard_bits` are reported unconditionally. A confidence
+  floor that eats the batch, or a hard-loss column reading 0.0 because its
+  weight is 0, is indistinguishable from success in the log.
 
 Changing one is welcome *with* the measurement that says it should change.
 

@@ -1,5 +1,75 @@
 # Changelog
 
+## 0.2.0 — unreleased
+
+The project's question changed. Up to 0.1.0 it asked whether a shared recurrent
+core helps a frozen host learn a fixed corpus. It now asks a sharper one:
+**how much of a larger model's next-token distribution can a small frozen host
+recover, given about a million trainable parameters of temporal recurrence —
+and does it recover more than the same budget spent spatially as LoRA?**
+
+Teacher gives probabilities, student learns probabilities. Three things had to
+be built for that, and two of them came from a measurement that contradicted
+the obvious design:
+
+- **`odydora/distill.py`: top-k-plus-remainder KL from a larger teacher.** The
+  exact full-vocabulary KL needs a 622 MB logit tensor per model at Qwen3's
+  `V=151,936` and will not fit on a T4. Compressing the teacher to its top-128
+  log-probabilities **plus one lumped remainder** reproduces the exact KL's
+  gradient direction at cosine **0.998** on peaked synthetic logits, and is
+  exactly **0.0** when the two distributions agree. A bare top-k KL without the
+  remainder term renormalises over the subset and reports a non-zero loss at
+  agreement — an objective with a floor its own optimum cannot reach.
+- **`RecurrentCore(proj_rank=...)`: a factored I/O bottleneck.** At the
+  `Qwen3-0.6B` student's `d=1024`, dense projections for an `N=512` core cost
+  `1,048,576` parameters against `W`'s `261,632` — the recurrence, the part that
+  carries state, is a fifth of the module. `proj_rank=64` cuts the interface to
+  `196,608`, so `W` becomes **57%** of a `458,753`-parameter core. Only
+  `up.weight` is zeroed, so the module is still an exact identity at step 0
+  while every factor takes gradient as soon as `up` leaves the origin.
+- **`build(lora_targets=...)`, and a much smaller adapter.** `r=32` on all seven
+  projections is `20,185,088` trainable parameters — **44x** the core, which
+  makes any win unattributable. Held to `r=2` on attention only, the adapter is
+  `573,440` against the core's `458,753`: a ratio of **1.25x**, printed by the
+  build cell so it cannot drift unnoticed.
+
+Measured end to end on the real 28-layer `Qwen3-0.6B` geometry with random
+weights (no download): adapter `573,440` + core `458,753` = `1,032,193`
+trainable, the matched adapter-only control at `r=4` is `1,146,880` — *more*
+than the treatment, which is the honest direction for the comparison to lean.
+
+Two diagnostics exist because their absence is indistinguishable from success:
+
+- **`kept_fraction`** in every log row. A `min_teacher_conf` floor set above the
+  teacher's typical top-k mass silently discards most of the batch while the KL
+  column still falls on whatever survives. The default is now `0.0`.
+- **`hard_bits`** computed whenever labels exist, not only when weighted in. A
+  KL that falls while this rises is a student drifting toward the teacher's
+  *shape* and away from the text, and a figure reading `0.0` because its weight
+  is zero looks like a student predicting perfectly.
+
+`evaluate_gap` reports the gap overall **and** in the tail, against
+`teacher_reference_bits` as the floor: without the teacher's own cross-entropy
+on the same chunks, "the gap shrank" has no scale. The corpus is a four-way
+round-robin mixture (web expository text, synthetic textbook prose,
+mathematics, code), because a student that overfits one domain has learned a
+dialect rather than a distribution.
+
+The agentic-SFT path is unchanged and still reachable through `MODE = "sft"`, so
+the 0.1.0 result stays reproducible. 61 tests pass.
+
+### Corpus audit that closed the previous chapter
+
+`MoreThought/Fable-5.1-Max-Reasoning-Filtered-10000x` (`split="train"`) turned
+out to hold only **54 unique base trajectories** in its first 200 rows; the rest
+are the same trajectories truncated at different intermediate steps (sometimes
+ending on `role="tool"`, sometimes relabelling an intermediate `<thought>` as
+`<final_answer>`) with regex substitutions on the prompt preamble. Row 74's
+trajectory reappears 24 times across `0..199`, and **40/40** of a positional
+validation slice (`skip_traces=160`) shares its base trajectory with the
+training slice. That is why distillation replaced it rather than supplementing
+it.
+
 ## 0.1.0 — unreleased
 
 First working version: a shared `N × N` recurrent core attached to a frozen

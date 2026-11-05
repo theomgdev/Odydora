@@ -6,24 +6,60 @@
 
 A single `N × N` matrix, shared by every decoder layer of a frozen 4-bit
 language model, carrying a recurrent state **across layers** and **across chunk
-boundaries** — so a 30,000-token agentic trace trains in 1,024-token pieces
-without the backward pass ever spanning the whole document.
+boundaries**.
 
 The frozen transformer is the limbic system. The core is the frontal cortex
-steering it, and it costs 266,241 trainable parameters at N=64 regardless of how
-deep the host model is.
+steering it, and it costs the same trainable parameters however deep the host
+model is.
+
+## The question
+
+A small model and a large model of the same family share a tokenizer, so their
+next-token distributions live in the same space and the distance between them is
+measurable. So:
+
+> **How much of a larger model's distribution can about a million trainable
+> parameters of temporal recurrence recover inside a smaller frozen host — and
+> does it recover more than the same budget spent spatially, as LoRA?**
+
+Teacher gives probabilities, student learns probabilities. The metric is the
+KL from student to teacher in bits per token, reported overall **and** over the
+trailing chunks where the recurrent state has history behind it — state carry
+can only pay where there is a past, so a gain in the tail is the mechanism and
+a gain only in the mean is something else.
 
 ```
-for chunk in trace:                                     # 1k tokens at a time
+for chunk in stream:                                    # 512 tokens at a time
+    teacher_logprobs, teacher_ids = teacher(chunk).topk(128)   # frozen, no grad
     for layer L in CORE_LAYERS:
         h         = block_L(h)                          # frozen, 4-bit
-        h         = h + LoRA_L(h)                       # trained, standard
-        s         = (1-a)·s_prev[L] + a·RMSNorm(down(pool(h)) + s_prev[L] @ W)
-        h         = h + up(s)                           # up starts at zero
-        s_prev[L] = s.detach()                          # at the chunk boundary
+        h         = h + LoRA_L(h)                        # trained, r=2, attention only
+        s         = (1-a)·s_prev[L] + a·RMSNorm(down(down_in(pool(h))) + s_prev[L] @ W)
+        h         = h + up(up_in(s))                     # up starts at zero
+        s_prev[L] = s.detach()                           # at the chunk boundary
+    loss = KL_topk_plus_remainder(student_logits, teacher_logprobs, teacher_ids)
 ```
 
-One `W`, one `down`, one `up`, one mixing rate — shared by all 28 layers.
+One `W`, one factored `down`, one factored `up`, one mixing rate — shared by all
+28 layers.
+
+### The budget, measured on the real 28-layer `Qwen3-0.6B` geometry
+
+| arm | adapter | core | total trainable |
+|---|---|---|---|
+| **Odydora** (`N=512`, `proj_rank=64`, `r=2` attention) | 573,440 | 458,753 | 1,032,193 |
+| **Matched LoRA** (`N=0`, `r=4` attention) | 1,146,880 | 0 | 1,146,880 |
+
+The control arm gets *more* trainable parameters than the treatment. Two
+measurements forced this geometry:
+
+- **A wide core's dense I/O projections dominate it.** At `d=1024` and `N=512`
+  they cost `2 · 1024 · 512 = 1,048,576` against `W`'s `261,632`, so the
+  recurrence is a fifth of the module. `proj_rank=64` cuts the interface to
+  `196,608` and `W` becomes **57%** of the core.
+- **LoRA at its usual settings buries the core.** `r=32` on all seven
+  projections is `20,185,088` parameters — **44x** the core, which makes any
+  win unattributable. Hence `r=2` on attention only.
 
 ## Lineage: this comes from OdyssNet
 
@@ -137,7 +173,7 @@ git clone https://github.com/theomgdev/Odydora
 cd Odydora
 python -m venv .venv && .venv/Scripts/activate   # or source .venv/bin/activate
 pip install -e ".[dev]"
-pytest -q                                        # 45 tests, CPU, no downloads
+pytest -q                                        # 61 tests, CPU, no downloads
 ```
 
 ## Use
@@ -185,6 +221,44 @@ edit the generator, not the `.ipynb`.
 
 ## Corpus
 
+### Distillation (the current path)
+
+A four-way interleaved mixture, streamed, round-robined so no stage of training
+sees a long run of one domain — that is what separates a mixture from
+sequential fine-tuning, which forgets:
+
+| weight | corpus | what it is |
+|---|---|---|
+| 3 | `HuggingFaceFW/fineweb-edu` (`sample-10BT`) | expository web text |
+| 2 | `HuggingFaceTB/smollm-corpus` (`cosmopedia-v2`) | synthetic textbook prose |
+| 1 | `open-web-math/open-web-math` | mathematics |
+| 1 | `bigcode/the-stack-smol` | code |
+
+Weights are rows per round rather than token fractions, because `fineweb-edu`
+rows are short and `cosmopedia`'s are long — equal weights would skew the token
+mixture toward the synthetic half.
+
+**Every position is supervised**, against 10.1% in the agentic path, because
+the teacher labels every token rather than a corpus labelling some of them.
+That density is most of why distillation moves faster per step.
+
+The teacher's distribution is compressed to its top-128 log-probabilities
+**plus one lumped remainder**, and the student is scored on exactly that
+`k + 1`-event partition. Measured against the exact full-vocabulary KL on
+peaked synthetic logits at `V = 151,936`: gradient direction at cosine
+**0.998**, and exactly **0.0** at agreement. A bare top-k KL without the
+remainder renormalises over the subset and reports a non-zero loss for a
+student that agrees with its teacher everywhere — a floor the optimum cannot
+reach. The exact KL needs a 622 MB logit tensor per model and does not fit on a
+T4.
+
+The two tokenizers must agree, and `check_vocab_match` enforces it rather than
+assuming it: every Qwen3 dense model shares 151,669 entries and byte-identical
+encoding, but across families a silent mismatch trains the student toward noise
+while the loss curve looks healthy.
+
+### Agentic traces (the earlier path, still reachable via `MODE = "sft"`)
+
 `MoreThought/Fable-5.1-Max-Reasoning-Filtered-10000x` — agentic coding and
 reasoning traces with `messages` and a `tools` schema per row.
 
@@ -193,6 +267,17 @@ split is corrupted: measured over the first ten rows of each, `full` has `tools`
 null in 10/10 rows, **64 of its 65 tool calls degraded to the literal string
 `"unknown_tool"`**, and no `<thought>` content at all. `train` has tools on
 every row, zero `unknown_tool`, and reasoning intact.
+
+**And `train` has a deduplication problem of its own.** Audited across its
+first 200 rows: only **54 unique base trajectories**. The rest are those same
+trajectories truncated at different intermediate steps — sometimes ending on
+`role="tool"`, sometimes relabelling an intermediate `<thought>` as
+`<final_answer>` — with regex substitutions on the prompt preamble. Row 74's
+trajectory reappears 24 times across `0..199`, and **40/40** of a positional
+validation slice (`skip_traces=160`) shares its base trajectory with the
+training slice: identical opening assistant turns, identical first tool
+outputs. A held-out split on this corpus needs deduplication by base-trajectory
+signature, not by row position.
 
 Real trace lengths, measured with the Qwen3 tokenizer: min 19,122, median
 32,480, mean 31,822, max 48,343 tokens. The card's "~50,000 average" is the
@@ -218,23 +303,38 @@ boilerplate.
 Parameter efficiency is a *comparative* claim, so the control is built
 alongside the treatment:
 
-1. `count_parameters(model)` splits the trainable count into adapter and core.
-2. `matched_rank(...)` finds the adapter-only rank whose trainable count matches
-   the core's budget.
-3. Both arms run at the same seed, on the same traces in the same order, for the
-   same number of steps.
-4. The metric is held-out bits/token on held-out **traces** — never held-out
-   chunks of training traces, or the carried state leaks across the split —
-   reported overall *and* on the tail, since carry can only pay where a chunk
-   has history behind it.
+1. `count_parameters(model)` splits the trainable count into adapter and core,
+   and the build cell prints their ratio: if the adapter is many times the core,
+   no win can be attributed to the core and the run is not worth its GPU hours.
+2. `adapter_only_params(...)` / `matched_rank(...)` find the adapter-only rank
+   whose trainable count matches the treatment's total budget.
+3. Both arms run at the same seed, on the same chunks in the same order, for the
+   same number of steps, through the **same** `distill_steps` and
+   `evaluate_gap` — `attach_core(n=0)` is a transparent no-op, so nothing about
+   the comparison depends on a second code path.
+4. The metric is the KL to the teacher, reported overall *and* on the tail,
+   against `teacher_reference_bits` as the floor. Without the teacher's own
+   cross-entropy on the same chunks, "the gap shrank" has no scale.
 5. **The gap is reported including when it is negative.** A core that loses to a
    matched LoRA is a real finding.
 
-### Measured benchmark: Odydora Recurrent Core vs Matched LoRA Baseline
+Two diagnostics are printed because their absence is indistinguishable from
+success: `kept_fraction` (a `min_teacher_conf` floor above the teacher's typical
+top-k mass silently discards most of the batch while the KL still falls on
+whatever survives) and `hard_bits` (a KL that falls while this rises is a
+student drifting toward the teacher's *shape* and away from the text).
+
+### Measured benchmark: agentic SFT, Odydora core vs matched LoRA
+
+The figures below are from the **earlier agentic-SFT chapter** and are kept
+because they are real. They were taken before the corpus deduplication audit
+above, so the held-out split they use is contaminated by prefix-truncated
+copies of training trajectories — treat the absolute values as upper bounds and
+the *ordering* as the finding.
 
 Measured on a Google Colab Tesla T4 GPU on `Qwen/Qwen3-1.7B` (4-bit NF4, 28 layers, $d=2048$)
 against `MoreThought/Fable-5.1-Max-Reasoning-Filtered-10000x` (`split="train"`).
-Evaluation ran over 157 held-out chunks from traces 160..200 (unseen during training).
+Evaluation ran over 157 held-out chunks from traces 160..200.
 Both runs trained for identical step counts (220 chunks of 512 tokens), with `grad_accum=8`,
 learning rate $2\times 10^{-4}$, and AdamW.
 
@@ -270,7 +370,7 @@ odydora/core.py      RecurrentCore — the shared N×N mixer
 odydora/adapter.py   attach_core(), without_odydora() — hooks, state, counting
 odydora/data.py      streaming loader, assistant-only mask, chunker
 odydora/train.py     build(), configure_optimizer(), train_steps(), evaluate()
-tests/               43 tests, CPU-only, no network
+tests/               61 tests, CPU-only, no network
 tools/               notebook generator and structural validator
 notebooks/           the Colab notebook
 ```

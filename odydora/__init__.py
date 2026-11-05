@@ -19,9 +19,19 @@ from .adapter import (
 )
 from .core import RecurrentCore
 from .data import chunk_trace, describe_trace, mask_assistant_turns, stream_traces
+from .distill import (
+    check_vocab_match,
+    distill_loss,
+    distill_steps,
+    evaluate_gap,
+    stream_text_chunks,
+    teacher_reference_bits,
+    teacher_targets,
+)
 from .train import (
     adapter_only_params,
     build,
+    build_teacher,
     configure_optimizer,
     evaluate,
     inspect_checkpoint,
@@ -34,20 +44,25 @@ from .train import (
     trainable_state,
 )
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 __all__ = [
     "RecurrentCore",
     "adapter_only_params",
     "attach_core",
     "build",
+    "build_teacher",
     "bypass_core",
+    "check_vocab_match",
     "chunk_trace",
     "configure_optimizer",
     "count_parameters",
     "describe_trace",
     "detach_core",
+    "distill_loss",
+    "distill_steps",
     "evaluate",
+    "evaluate_gap",
     "inspect_checkpoint",
     "lora_config",
     "mask_assistant_turns",
@@ -55,7 +70,10 @@ __all__ = [
     "report",
     "restore",
     "save",
+    "stream_text_chunks",
     "stream_traces",
+    "teacher_reference_bits",
+    "teacher_targets",
     "train_steps",
     "trainable_state",
     "without_odydora",

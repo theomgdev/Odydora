@@ -177,6 +177,80 @@ def test_mix_cannot_leave_zero_one_however_alpha_trains():
         assert 0.0 < float(core.mix) < 1.0, f"alpha={value} escaped the interval"
 
 
+def test_proj_rank_moves_the_budget_from_interface_to_recurrence():
+    """The point of the bottleneck. At a real host width the dense projections
+    dominate the module, so a wide core spends most of its budget on interface
+    rather than on the matrix that carries state.
+    """
+    width, n = 1024, 512
+    dense = RecurrentCore(n=n, width=width, stride=64, proj_rank=0)
+    thin = RecurrentCore(n=n, width=width, stride=64, proj_rank=64)
+
+    def split(core):
+        interface = sum(
+            p.numel()
+            for name, p in core.named_parameters()
+            if name.split(".")[0] in ("down", "up", "down_in", "up_in")
+        )
+        return interface, core.W.numel() - core.n
+
+    dense_interface, dense_w = split(dense)
+    thin_interface, thin_w = split(thin)
+
+    assert dense_w == thin_w, "the recurrence must be untouched by the bottleneck"
+    assert dense_interface == 2 * width * n
+    assert thin_interface < dense_interface / 4, (
+        f"bottleneck saved too little: {thin_interface:,} vs {dense_interface:,}"
+    )
+    assert thin_w > thin_interface, (
+        f"W ({thin_w:,}) must outweigh the interface ({thin_interface:,}) "
+        "or the budget is still being spent on plumbing"
+    )
+
+
+def test_a_bottlenecked_core_is_identity_at_step_zero_yet_every_factor_trains():
+    """Zeroing only `up` -- the last factor on the output path -- keeps the
+    insertion an exact identity while leaving a live gradient path. Zeroing
+    `up_in` as well would put a zero in every factor's gradient and the core
+    could never leave the origin, which looks like a safety measure and is a
+    permanent freeze.
+    """
+    torch.manual_seed(8)
+    core = RecurrentCore(n=32, width=64, stride=4, proj_rank=8)
+    x = torch.randn(1, 12, 64)
+    y, _ = core(x)
+    assert torch.equal(y, torch.zeros_like(y)), "step 0 must be an exact identity"
+
+    target = torch.randn_like(x)
+    opt = torch.optim.SGD(core.parameters(), lr=0.5)
+    for _ in range(3):
+        opt.zero_grad()
+        out, _ = core(x)
+        (out - target).pow(2).mean().backward()
+        opt.step()
+
+    for name, param in core.named_parameters():
+        assert param.grad is not None, f"{name} has no gradient at all"
+        assert param.grad.abs().sum() > 0, f"{name} is frozen at the origin"
+
+
+def test_the_bottleneck_preserves_chunked_carry_equivalence():
+    """Every later measurement depends on this identity, so the factored path
+    has to be checked separately -- an extra matmul inside the recurrence is
+    exactly where a chunk-boundary bug would hide.
+    """
+    torch.manual_seed(9)
+    core = RecurrentCore(n=16, width=32, stride=4, window=0, proj_rank=8)
+    nn.init.xavier_uniform_(core.up.weight)
+    x = torch.randn(1, 24, 32)
+    whole, s_whole = core(x)
+    a, s = core(x[:, :12])
+    b, s_chunked = core(x[:, 12:], state=s)
+    assert whole.abs().sum() > 0, "up must be open so the comparison is non-trivial"
+    assert torch.allclose(whole, torch.cat([a, b], dim=1), atol=1e-5)
+    assert torch.allclose(s_whole, s_chunked, atol=1e-5)
+
+
 def test_repr_does_not_touch_the_autograd_graph():
     """Printing the module must not convert a grad-tracking tensor to a scalar.
 

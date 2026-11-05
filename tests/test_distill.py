@@ -1,10 +1,15 @@
+import sys
+import types
+
 import pytest
 import torch
 from transformers import Qwen2Config, Qwen2ForCausalLM
 
 from odydora.adapter import attach_core, count_parameters
 from odydora.distill import (
+    DEFAULT_MIXTURE,
     LOG2,
+    _row_text,
     check_vocab_match,
     distill_loss,
     distill_steps,
@@ -301,6 +306,90 @@ def test_distill_steps_reports_the_kept_fraction_every_row():
         assert 0.0 < row["kept_fraction"] <= 1.0, (
             f"kept_fraction out of range: {row['kept_fraction']}"
         )
+
+
+def test_every_default_corpus_is_ungated_with_a_declared_license():
+    """A corpus default is a trust decision made on the reader's behalf.
+
+    `bigcode/the-stack-smol` -- the obvious code source -- is gated AND carries
+    three files the Hub's scanner flagged as malware, and it stopped the
+    notebook at cell 4 with a DatasetNotFoundError for a reader who had not
+    requested access. This asserts the shape of the mixture offline; the gating
+    and scan status itself has to be checked against the Hub before adding an
+    entry, which no local test can do.
+    """
+    assert DEFAULT_MIXTURE, "the default mixture cannot be empty"
+    repos = [entry[0] for entry in DEFAULT_MIXTURE]
+
+    assert "bigcode/the-stack-smol" not in repos, (
+        "the-stack-smol is gated and has malware-flagged files; it must not be "
+        "a default"
+    )
+    assert len(repos) == len(set(repos)), f"duplicate source in mixture: {repos}"
+    assert len(repos) >= 3, (
+        f"a {len(repos)}-source mixture is narrow enough that the student can "
+        "learn a dialect rather than a distribution"
+    )
+    for repo, _config, split, field, weight in DEFAULT_MIXTURE:
+        assert "/" in repo, f"{repo!r} is not a Hub repo id"
+        assert split, f"{repo} has no split"
+        assert isinstance(field, str | tuple), f"{repo} field is {type(field)}"
+        assert weight >= 1, f"{repo} has weight {weight}"
+
+
+def test_a_tuple_text_field_joins_its_columns():
+    """Instruction corpora split a document across a prompt column and a
+    response column. Reading one of them trains on half of every document while
+    everything downstream looks perfectly normal.
+    """
+    row = {"input": "Write a function.", "output": "def f(): pass", "other": "ignored"}
+    assert _row_text(row, "input") == "Write a function."
+    joined = _row_text(row, ("input", "output"))
+    assert joined == "Write a function.\n\ndef f(): pass"
+    # A missing or empty column must not leave a dangling separator.
+    assert _row_text({"input": "only"}, ("input", "output")) == "only"
+    assert _row_text({"input": "", "output": "x"}, ("input", "output")) == "x"
+    assert _row_text({}, ("input", "output")) == ""
+
+
+def test_an_unopenable_source_costs_one_stream_not_the_whole_run(monkeypatch):
+    """A gated repo, a removed dataset or a script-based one that `datasets>=4`
+    refuses should narrow the mixture, not kill the stage — and the surviving
+    sources must be named, because a silently narrower mixture looks identical
+    to the intended one in the loss curve.
+    """
+    class FakeTok:
+        def __call__(self, text, add_special_tokens=False):
+            return {"input_ids": list(range(40))}
+
+    good_rows = [{"text": "x" * 600}, {"text": "y" * 600}]
+
+    def fake_load_dataset(repo, config=None, split=None, streaming=False):
+        if repo == "gated/repo":
+            raise RuntimeError("is a gated dataset on the Hub")
+        return list(good_rows)
+
+    import odydora.distill as mod
+
+    fake_datasets = types.ModuleType("datasets")
+    fake_datasets.load_dataset = fake_load_dataset
+    monkeypatch.setitem(sys.modules, "datasets", fake_datasets)
+
+    spec = (
+        ("gated/repo", None, "train", "text", 1),
+        ("open/repo", None, "train", "text", 1),
+    )
+    chunks = list(
+        mod.stream_text_chunks(FakeTok(), 16, datasets_spec=spec, max_chunks=4)
+    )
+    assert chunks, "the open source should still have produced chunks"
+    assert all(c[0].shape[0] == 1 for c in chunks)
+
+    # Every source failing is a different situation: there is nothing to train
+    # on, and continuing silently would report a loss over an empty stream.
+    all_bad = (("gated/repo", None, "train", "text", 1),)
+    with pytest.raises(RuntimeError, match="nothing to"):
+        list(mod.stream_text_chunks(FakeTok(), 16, datasets_spec=all_bad))
 
 
 def test_teacher_reference_bits_gives_the_floor_the_gap_is_read_against():

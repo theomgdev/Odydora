@@ -27,7 +27,7 @@ estimate; they are a reason to measure.
 
 ## What the test suite proves, and the trap in it
 
-61 tests, CPU-only, no network, a few seconds. They build models from `config`
+64 tests, CPU-only, no network, a few seconds. They build models from `config`
 with random weights. `GPT2Config(n_layer=2)` in `tests/test_adapter.py` exists
 only to assert the shared-`W` invariant cheaply — **no pretrained GPT-2 is ever
 trained or reported, and a result on one would be worthless.**
@@ -70,6 +70,11 @@ measurement, which is in the README:
 - `kept_fraction` and `hard_bits` are reported unconditionally. A confidence
   floor that eats the batch, or a hard-loss column reading 0.0 because its
   weight is 0, is indistinguishable from success in the log.
+- Every corpus in `DEFAULT_MIXTURE` is ungated and malware-clean. A default
+  names a dataset on the reader's behalf, so a gated one stops their notebook
+  at the data cell and a flagged one hands them someone else's trust decision.
+  Check `HfApi().dataset_info(repo).gated` and the Hub's scan status *before*
+  adding an entry — `bigcode/the-stack-smol` failed both and shipped once.
 
 Changing one is welcome *with* the measurement that says it should change.
 

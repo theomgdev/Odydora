@@ -90,6 +90,15 @@ expository text, synthetic textbook prose, mathematics, code — round-robined s
 no stage sees a long run of one domain. That is what separates a mixture from
 sequential fine-tuning, which forgets.
 
+**Every source is ungated and malware-clean, checked before shipping.** The
+obvious code corpus, `bigcode/the-stack-smol`, is both gated and carries three
+files the Hub's scanner flagged as malware — it stopped this notebook at cell 4
+with a `DatasetNotFoundError` for a reader who had not requested access. A
+corpus default is a trust decision made on the reader's behalf, so the bar is
+ungated plus a clean scan plus a declared license. A source that still fails to
+open narrows the mixture with a named reason rather than killing the stage, and
+cell 4 prints what the run actually trained on.
+
 ### Numbers measured before you run this, so you can tell a surprise from a bug
 
 - The state sits on the `sqrt(N)` sphere exactly because RMSNorm runs every
@@ -301,9 +310,14 @@ if MODE == "distill":
 md("""
 ## 4 — Data
 
-A four-way interleaved mixture, streamed. Every position is supervised here,
-unlike the agentic path where roughly 10% of tokens were — that density is most
-of why distillation moves faster per step.
+A four-way interleaved mixture, streamed, every source ungated. Every position
+is supervised here, unlike the agentic path where roughly 10% of tokens were —
+that density is most of why distillation moves faster per step.
+
+If a source fails to open (gated, removed, or script-based and unsupported by
+`datasets>=4`) it is skipped with a named reason and the mixture carries on with
+the rest — but **read the printed source list**, because a silently narrower
+mixture looks identical to the intended one in the loss curve.
 
 The held-out set is materialised into a list on purpose: both arms of the
 comparison must be scored on the *same* chunks in the *same* order, and a
@@ -317,7 +331,9 @@ from odydora.data import describe_trace, stream_traces
 if MODE == "distill":
     print("corpus mixture (round-robin, weight = rows per round):")
     for repo, config, split, field, weight in DEFAULT_MIXTURE:
-        print(f"  {weight}x  {repo}" + (f" [{config}]" if config else ""))
+        columns = field if isinstance(field, str) else " + ".join(field)
+        print(f"  {weight}x  {repo}" + (f" [{config}]" if config else "")
+              + f"   column: {columns}")
 
     def chunks(skip=0, limit=None):
         return stream_text_chunks(tok, CFG["chunk"], max_chunks=limit,

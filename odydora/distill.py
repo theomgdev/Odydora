@@ -54,6 +54,19 @@ LOG2 = 0.6931471805599453
 # short and cosmopedia's are long, so equal weights would skew the token mix
 # toward the synthetic half.
 #
+# Every entry is deliberately **ungated and malware-clean**. A default that
+# sends a reader to an access request wall stops the notebook at cell 4 with a
+# `DatasetNotFoundError`, and `bigcode/the-stack-smol` -- the obvious code
+# source, and what this used to name -- is both gated (`gated="auto"`) and
+# carries three files Hugging Face's scanner flagged as malware. A corpus
+# default is a trust decision made on the reader's behalf, so the bar is
+# ungated plus a clean scan plus a declared license, checked before shipping
+# rather than after a user hits the wall.
+#
+# The `text_field` entry may be a tuple, in which case those columns are joined
+# with a blank line: instruction corpora split the prompt and the response
+# across two columns, and taking only one of them trains on half a document.
+#
 # Defined here, above every function, because `stream_text_chunks` reads it as a
 # default and the notebook imports the name directly: a module-level constant
 # placed after its consumers exists at call time but not at import time, which
@@ -62,7 +75,9 @@ DEFAULT_MIXTURE = (
     ("HuggingFaceFW/fineweb-edu", "sample-10BT", "train", "text", 3),
     ("HuggingFaceTB/smollm-corpus", "cosmopedia-v2", "train", "text", 2),
     ("open-web-math/open-web-math", None, "train", "text", 1),
-    ("bigcode/the-stack-smol", None, "train", "content", 1),
+    # NVIDIA, CC-BY-4.0, ungated. Replaces bigcode/the-stack-smol, which is
+    # gated and has three files flagged as malware by the Hub's scanner.
+    ("nvidia/OpenCodeInstruct", None, "train", ("input", "output"), 1),
 )
 
 
@@ -242,23 +257,47 @@ def stream_text_chunks(
     stage of training sees a long run of one domain, which is what turns a
     mixture into sequential fine-tuning with its usual forgetting.
 
-    `datasets_spec` is `[(repo, config, split, text_field, weight), ...]`.
+    `datasets_spec` is `[(repo, config, split, text_field, weight), ...]`, where
+    `text_field` is a column name or a tuple of them to join with a blank line.
     Every window is fully supervised: in distillation the teacher labels every
     position, so there is no mask to build and no unsupervised span to drop.
     `is_doc_start` resets the recurrent state at a document boundary, exactly
     as a trace boundary does in the agentic path.
+
+    A source that cannot be opened is skipped with a named reason rather than
+    killing the run: a gated repository, a removed dataset or a script-based one
+    that `datasets>=4` no longer loads should cost the mixture one stream, not
+    the whole stage. The surviving sources are listed so the reader knows what
+    the run actually trained on, since a silently narrower mixture looks exactly
+    like the intended one in the loss curve.
     """
     from datasets import load_dataset
 
     spec = datasets_spec or DEFAULT_MIXTURE
-    streams = []
+    streams, skipped = [], []
     for repo, config, split, field, weight in spec:
-        rows = load_dataset(repo, config, split=split, streaming=True) if config \
-            else load_dataset(repo, split=split, streaming=True)
-        streams.append({"name": f"{repo}:{config or split}", "it": iter(rows),
-                        "field": field, "weight": max(int(weight), 1), "done": False})
+        label = f"{repo}" + (f" [{config}]" if config else "")
+        try:
+            rows = load_dataset(repo, config, split=split, streaming=True) if config \
+                else load_dataset(repo, split=split, streaming=True)
+            streams.append({"name": label, "it": iter(rows), "field": field,
+                            "weight": max(int(weight), 1), "done": False})
+        except Exception as exc:
+            reason = type(exc).__name__
+            skipped.append(f"{label} ({reason})")
+            print(f"  corpus: SKIPPING {label} -- {reason}: {str(exc)[:120]}",
+                  flush=True)
 
-    produced, skipped = 0, 0
+    if not streams:
+        raise RuntimeError(
+            "every corpus in the mixture failed to open, so there is nothing to "
+            f"train on: {'; '.join(skipped)}"
+        )
+    if skipped:
+        print(f"  corpus: training on {len(streams)} of {len(spec)} sources "
+              f"({', '.join(s['name'] for s in streams)})", flush=True)
+
+    produced, passed = 0, 0
     while any(not s["done"] for s in streams):
         for stream in streams:
             if stream["done"]:
@@ -269,7 +308,7 @@ def stream_text_chunks(
                 except StopIteration:
                     stream["done"] = True
                     break
-                text = row.get(stream["field"]) or ""
+                text = _row_text(row, stream["field"])
                 if len(text) < min_chars:
                     continue
                 ids = tokenizer(text, add_special_tokens=False)["input_ids"]
@@ -280,8 +319,8 @@ def stream_text_chunks(
                     # cross-entropy exactly as an all-masked chunk does.
                     if len(window) <= 1:
                         continue
-                    if skipped < skip_chunks:
-                        skipped += 1
+                    if passed < skip_chunks:
+                        passed += 1
                         continue
                     tensor = torch.tensor([window], dtype=torch.long)
                     yield tensor, tensor.clone(), begin == 0
@@ -291,6 +330,19 @@ def stream_text_chunks(
                               f"({stream['name']})", flush=True)
                     if max_chunks and produced >= max_chunks:
                         return
+
+
+def _row_text(row, field):
+    """One row's text, joining several columns when `field` is a tuple.
+
+    Instruction corpora split a document across a prompt column and a response
+    column; taking only one of them trains the student on half of every
+    document while everything downstream looks normal.
+    """
+    if isinstance(field, str):
+        return row.get(field) or ""
+    parts = [str(row.get(name) or "").strip() for name in field]
+    return "\n\n".join(part for part in parts if part)
 
 
 def distill_steps(

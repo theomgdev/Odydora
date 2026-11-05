@@ -5,6 +5,40 @@ project can be traced to the exact code that produced it. The Colab badge
 tracks `main`, so the notebook a reader opens is always the current one —
 a tag is the fixed reference point, not the moment of availability.
 
+## 0.2.1 — 2026-11-06
+
+**Every corpus in the default mixture is now ungated and malware-clean.**
+`bigcode/the-stack-smol` was the obvious code source and shipped in 0.2.0; it
+is gated (`gated="auto"`) **and** carries three files the Hub's scanner flagged
+as malware, so a reader who had not requested access hit a
+`DatasetNotFoundError` at cell 4 — and one who had would have been handed
+someone else's trust decision. Replaced with `nvidia/OpenCodeInstruct`
+(CC-BY-4.0, ungated, verified streaming).
+
+A corpus default names a dataset on the reader's behalf, so the bar is now
+explicit in `AGENTS.md`: check `HfApi().dataset_info(repo).gated` and the Hub's
+scan status *before* adding an entry. Checked alongside the replacement and
+rejected for the same reasons: `bigcode/the-stack-dedup`, `bigcode/starcoderdata`,
+`nampdn-ai/tiny-codes`, `bigcode/the-stack-v2-train-smol-ids` (all gated);
+`codeparrot/github-code-clean` and `bigcode/commitpackft` (script-based, which
+`datasets>=4` refuses to load).
+
+Two mechanisms came out of it:
+
+- **`text_field` may be a tuple**, joined with a blank line. Instruction
+  corpora split a document across a prompt column and a response column, and
+  reading one of them trains the student on half of every document while
+  everything downstream looks normal.
+- **A source that cannot be opened narrows the mixture instead of killing the
+  stage**, with the reason named and the surviving sources printed. A gated
+  repo, a removed dataset or a script-based one should cost one stream, not the
+  whole run — but a silently narrower mixture is indistinguishable from the
+  intended one in the loss curve, so the list is printed rather than inferred.
+  Every source failing still raises, since there is then nothing to train on.
+
+All three regressions were driven RED against 0.2.0's module from git before
+the fix. 64 tests pass.
+
 ## 0.2.0 — 2026-11-06
 
 The project's question changed. Up to 0.1.0 it asked whether a shared recurrent

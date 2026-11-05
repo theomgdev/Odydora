@@ -173,7 +173,7 @@ git clone https://github.com/theomgdev/Odydora
 cd Odydora
 python -m venv .venv && .venv/Scripts/activate   # or source .venv/bin/activate
 pip install -e ".[dev]"
-pytest -q                                        # 61 tests, CPU, no downloads
+pytest -q                                        # 64 tests, CPU, no downloads
 ```
 
 ## Use
@@ -232,11 +232,29 @@ sequential fine-tuning, which forgets:
 | 3 | `HuggingFaceFW/fineweb-edu` (`sample-10BT`) | expository web text |
 | 2 | `HuggingFaceTB/smollm-corpus` (`cosmopedia-v2`) | synthetic textbook prose |
 | 1 | `open-web-math/open-web-math` | mathematics |
-| 1 | `bigcode/the-stack-smol` | code |
+| 1 | `nvidia/OpenCodeInstruct` | code (CC-BY-4.0) |
 
 Weights are rows per round rather than token fractions, because `fineweb-edu`
 rows are short and `cosmopedia`'s are long — equal weights would skew the token
 mixture toward the synthetic half.
+
+**Every source is ungated and malware-clean, verified against the Hub before
+shipping.** The obvious code corpus, `bigcode/the-stack-smol`, is both gated
+(`gated="auto"`) and carries three files the Hub's scanner flagged as malware;
+it stopped the notebook at cell 4 with a `DatasetNotFoundError` for a reader
+who had not requested access. A corpus default is a trust decision made on the
+reader's behalf, so the bar is ungated, a clean scan, and a declared license.
+
+`text_field` may be a tuple, in which case those columns are joined with a
+blank line — instruction corpora split a document across a prompt column and a
+response column, and reading one of them trains the student on half of every
+document while everything downstream looks normal.
+
+A source that still fails to open (gated, removed, or script-based and
+unsupported by `datasets>=4`) narrows the mixture with a named reason rather
+than killing the stage, and the surviving sources are printed: a silently
+narrower mixture is indistinguishable from the intended one in the loss curve.
+Every source failing raises, since there is then nothing to train on.
 
 **Every position is supervised**, against 10.1% in the agentic path, because
 the teacher labels every token rather than a corpus labelling some of them.
@@ -370,7 +388,7 @@ odydora/core.py      RecurrentCore — the shared N×N mixer
 odydora/adapter.py   attach_core(), without_odydora() — hooks, state, counting
 odydora/data.py      streaming loader, assistant-only mask, chunker
 odydora/train.py     build(), configure_optimizer(), train_steps(), evaluate()
-tests/               61 tests, CPU-only, no network
+tests/               64 tests, CPU-only, no network
 tools/               notebook generator and structural validator
 notebooks/           the Colab notebook
 ```

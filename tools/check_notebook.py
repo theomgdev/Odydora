@@ -88,10 +88,24 @@ for i, cell in enumerate(cells):
             if not path.exists():
                 fail(f"cell {i} imports {node.module}, but {path} does not exist")
                 continue
+            # Functions, classes AND module-level constants: the notebook
+            # imports `DEFAULT_MIXTURE` directly, and a checker that only
+            # collects callables reports a false missing name for every
+            # constant a cell legitimately uses.
+            module = ast.parse(path.read_text(encoding="utf-8"))
             names = {
-                n.name for n in ast.walk(ast.parse(path.read_text(encoding="utf-8")))
+                n.name for n in ast.walk(module)
                 if isinstance(n, ast.FunctionDef | ast.ClassDef)
             }
+            for node_top in module.body:
+                if isinstance(node_top, ast.Assign):
+                    names.update(
+                        t.id for t in node_top.targets if isinstance(t, ast.Name)
+                    )
+                elif isinstance(node_top, ast.AnnAssign) and isinstance(
+                    node_top.target, ast.Name
+                ):
+                    names.add(node_top.target.id)
             for alias in node.names:
                 if alias.name not in names:
                     fail(f"cell {i}: {node.module} has no {alias.name}")

@@ -109,6 +109,8 @@ def build(
     four_bit=True,
     device_map="auto",
     attn_implementation="sdpa",
+    proj_rank=0,
+    lora_targets=LORA_TARGETS,
 ):
     """Load the base model in 4-bit, apply the adapter, attach the core.
 
@@ -157,12 +159,53 @@ def build(
             use_gradient_checkpointing=True,
             gradient_checkpointing_kwargs={"use_reentrant": False},
         )
-    model = get_peft_model(model, lora_config(use_dora=use_dora, r=r))
+    model = get_peft_model(
+        model, lora_config(use_dora=use_dora, r=r, targets=lora_targets)
+    )
     model = attach_core(
         model, n=n, layers=layers, stride=stride, mix=mix, window=window,
-        freeze_base=False,
+        freeze_base=False, proj_rank=proj_rank,
     )
     return model, tokenizer
+
+
+def build_teacher(
+    model_id,
+    four_bit=True,
+    device_map="auto",
+    attn_implementation="sdpa",
+):
+    """Load a larger model as a frozen distillation teacher.
+
+    No adapter and no core: the teacher is only ever asked for its next-token
+    distribution, so it is loaded in inference mode with gradients off from the
+    start. `requires_grad_(False)` plus `eval()` means the teacher's forward
+    builds no graph, which is what makes holding both models on one 15 GiB T4
+    possible at 4-bit (Qwen3-8B at nf4 is about 5 GiB against the student's
+    0.5 GiB).
+    """
+    from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
+
+    quant = None
+    if four_bit:
+        quant = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_quant_type="nf4",
+            bnb_4bit_use_double_quant=True,
+            bnb_4bit_compute_dtype=torch.float16,
+        )
+
+    tokenizer = AutoTokenizer.from_pretrained(model_id)
+    teacher = AutoModelForCausalLM.from_pretrained(
+        model_id,
+        quantization_config=quant,
+        device_map=device_map,
+        dtype=torch.float16 if four_bit else None,
+        attn_implementation=attn_implementation,
+    )
+    teacher.requires_grad_(False)
+    teacher.eval()
+    return teacher, tokenizer
 
 
 def configure_optimizer(model, lr=2e-4, core_lr_scale=5.0, weight_decay=0.01):

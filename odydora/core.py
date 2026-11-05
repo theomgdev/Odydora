@@ -58,16 +58,40 @@ class RecurrentCore(nn.Module):
     which is worse), so intra-chunk truncation buys no memory and only
     shortens how far credit can travel. Truncation happens at the chunk
     boundary, where the state crosses detached anyway.
+
+    `proj_rank` factors the two I/O projections through a bottleneck of that
+    width (`width -> p -> n` in, `n -> p -> width` out) instead of leaving
+    them dense. It exists so the parameter budget can be spent on temporal
+    depth rather than on interface: at `width=1024`, dense projections cost
+    `2*width*n`, which at `n=512` is 1.05M parameters against `W`'s 0.26M --
+    the recurrence, the part that actually carries state, ends up as a fifth
+    of the module. At `proj_rank=64` the same `n=512` core spends 0.20M on
+    interface and 0.26M on `W`. `proj_rank=0` keeps the dense projections.
+
+    Only `up.weight` -- the last factor on the output path -- is zeroed, so
+    the module is still an exact identity at step 0 while every other tensor
+    takes gradient as soon as `up` leaves the origin. Zeroing `up_in` as well
+    would put a zero in every factor's gradient and freeze the core forever.
     """
 
-    def __init__(self, n, width, stride=64, mix=0.02, window=0):
+    def __init__(self, n, width, stride=64, mix=0.02, window=0, proj_rank=0):
         super().__init__()
         if not 0.0 < mix < 1.0:
             raise ValueError(f"mix must lie in (0, 1), got {mix}")
         self.n, self.window = n, window
         self.stride = max(int(stride), 1)
-        self.down = nn.Linear(width, n, bias=False)
-        self.up = nn.Linear(n, width, bias=False)
+        self.proj_rank = int(proj_rank or 0)
+        if self.proj_rank:
+            p = self.proj_rank
+            self.down_in = nn.Linear(width, p, bias=False)
+            self.down = nn.Linear(p, n, bias=False)
+            self.up_in = nn.Linear(n, p, bias=False)
+            self.up = nn.Linear(p, width, bias=False)
+        else:
+            self.down_in = nn.Identity()
+            self.down = nn.Linear(width, n, bias=False)
+            self.up_in = nn.Identity()
+            self.up = nn.Linear(n, width, bias=False)
         self.norm = nn.RMSNorm(n)
         self.W = nn.Parameter(torch.empty(n, n))
         nn.init.xavier_uniform_(self.W)
@@ -110,8 +134,8 @@ class RecurrentCore(nn.Module):
 
         if time <= self.stride:
             pooled = x.squeeze(1) if time == 1 else x.mean(dim=1)
-            s = (1 - a) * s + a * self.norm(self.down(pooled) + s @ self.W)
-            delta = self.up(s).unsqueeze(1)
+            s = (1 - a) * s + a * self.norm(self.down(self.down_in(pooled)) + s @ self.W)
+            delta = self.up(self.up_in(s)).unsqueeze(1)
             if self.window == 1:
                 s = s.detach()
             return (delta if time == 1 else delta.expand(batch, time, -1)), s
@@ -128,7 +152,7 @@ class RecurrentCore(nn.Module):
             head = x[:, :split].view(batch, segments - 1, self.stride, -1).mean(2)
             tail = x[:, split:].mean(dim=1, keepdim=True)
             pooled = torch.cat([head, tail], dim=1)
-        projected = self.down(pooled)
+        projected = self.down(self.down_in(pooled))
 
         states = []
         for i in range(segments):
@@ -138,7 +162,7 @@ class RecurrentCore(nn.Module):
                 s = s.detach()
 
         # One batched `up`, then broadcast each segment's delta to its tokens.
-        delta = self.up(torch.stack(states, dim=1))
+        delta = self.up(self.up_in(torch.stack(states, dim=1)))
         delta = delta.unsqueeze(2).expand(batch, segments, self.stride, delta.shape[-1])
         return delta.reshape(batch, segments * self.stride, -1)[:, :time], s
 
@@ -148,5 +172,6 @@ class RecurrentCore(nn.Module):
         # about converting a grad-tracking tensor to a scalar.
         return (
             f"n={self.n}, stride={self.stride}, "
-            f"mix={self.mix.detach().item():.4f}, window={self.window}"
+            f"mix={self.mix.detach().item():.4f}, window={self.window}, "
+            f"proj_rank={self.proj_rank}"
         )

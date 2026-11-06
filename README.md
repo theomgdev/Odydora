@@ -173,7 +173,7 @@ git clone https://github.com/theomgdev/Odydora
 cd Odydora
 python -m venv .venv && .venv/Scripts/activate   # or source .venv/bin/activate
 pip install -e ".[dev]"
-pytest -q                                        # 64 tests, CPU, no downloads
+pytest -q                                        # 67 tests, CPU, no downloads
 ```
 
 ## Use
@@ -342,6 +342,38 @@ top-k mass silently discards most of the batch while the KL still falls on
 whatever survives) and `hard_bits` (a KL that falls while this rises is a
 student drifting toward the teacher's *shape* and away from the text).
 
+### Measured benchmark: D1 cross-scale distillation (`Qwen3-4B` → `Qwen3-0.6B`)
+
+First D1 run on a Google Colab Tesla T4 GPU (`Qwen/Qwen3-4B` teacher →
+`Qwen/Qwen3-0.6B` student, 400 training chunks of 512 tokens, 60 held-out
+chunks, `grad_accum=8`, teacher reference floor `3.1726` bits/token):
+
+| Arm | Trainable | Overall KL gap (step 0 → 400) | Tail 25% KL gap (step 0 → 400) | Student bits/tok (floor `3.1726`) |
+|---|---|---|---|---|
+| **Odydora** (`N=512, proj=64, r=2` attn) | 1,032,193 | `1.1034 → 0.9648` (`+0.1386`, 12.6%) | `1.0484 → 0.8949` (`+0.1535`, 14.6%) | `3.8187 → 3.6276` (`+0.1911`) |
+| **Matched LoRA** (`N=0, r=4` attn) | 1,146,880 | `1.1034 → 0.9454` (`+0.1580`, 14.3%) | `1.0484 → 0.8848` (`+0.1636`, 15.6%) | `3.8187 → 3.6106` (`+0.2081`) |
+
+In that initial 0.2.1 setup, the `r=4` adapter-only control beat the treatment
+by `0.0194` bits overall (`0.0101` in the tail) — and the control arm's own
+output (`"tail beat overall: YES"` despite `N=0`) exposed the three defects in
+the experimental setup that caused it, all fixed in 0.2.2:
+
+1. **The teacher was amnesic at every chunk boundary.** `teacher_targets`
+   called `teacher(input_ids=ids)` with no `past_key_values`, so on chunk 2 the
+   teacher's target distribution was ignorant of chunk 1 — and a student
+   carrying state from chunk 1 was *penalised* for remembering what the amnesic
+   teacher forgot. The teacher now carries a `DynamicCache` across chunks of the
+   same document (`teacher_cache=True`, capped at `2,048` tokens = 288 MiB).
+2. **85% of chunks were 1-chunk documents (`is_doc_start=True`).** At
+   `min_chars=512` (~120 tokens), 34 of 40 chunks on `OpenCodeInstruct` were
+   document starts (1.18 chunks/doc), wiping the recurrent state at 85% of
+   steps. `stream_text_chunks(..., min_chunks=2)` now drops single-chunk
+   documents so every streamed document crosses at least one chunk boundary.
+3. **`tail_kl_bits` sliced `VAL[-15:]` instead of continuation chunks
+   (`is_doc_start=False`).** `evaluate_gap` now splits `fresh_kl_bits` (chunk 1,
+   state reset) from `carried_kl_bits` (chunk 2+, state carried across a
+   boundary).
+
 ### Measured benchmark: agentic SFT, Odydora core vs matched LoRA
 
 The figures below are from the **earlier agentic-SFT chapter** and are kept
@@ -388,7 +420,7 @@ odydora/core.py      RecurrentCore — the shared N×N mixer
 odydora/adapter.py   attach_core(), without_odydora() — hooks, state, counting
 odydora/data.py      streaming loader, assistant-only mask, chunker
 odydora/train.py     build(), configure_optimizer(), train_steps(), evaluate()
-tests/               64 tests, CPU-only, no network
+tests/               67 tests, CPU-only, no network
 tools/               notebook generator and structural validator
 notebooks/           the Colab notebook
 ```

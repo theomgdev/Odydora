@@ -5,6 +5,47 @@ project can be traced to the exact code that produced it. The Colab badge
 tracks `main`, so the notebook a reader opens is always the current one —
 a tag is the fixed reference point, not the moment of availability.
 
+## 0.2.2 — 2026-11-06
+
+First measured D1 run (`Qwen3-4B` → `Qwen3-0.6B`, 400 training chunks of 512
+tokens, 60 held-out chunks, Colab T4):
+
+| Arm | Trainable | Overall KL gap (step 0 → 400) | Tail 25% KL gap (step 0 → 400) | Student bits/tok (floor `3.1726`) |
+|---|---|---|---|---|
+| **Odydora** (`N=512, proj=64, r=2`) | 1,032,193 | `1.1034 → 0.9648` (`+0.1386`, 12.6%) | `1.0484 → 0.8949` (`+0.1535`, 14.6%) | `3.8187 → 3.6276` (`+0.1911`) |
+| **Matched LoRA** (`N=0, r=4`) | 1,146,880 | `1.1034 → 0.9454` (`+0.1580`, 14.3%) | `1.0484 → 0.8848` (`+0.1636`, 15.6%) | `3.8187 → 3.6106` (`+0.2081`) |
+
+The control arm beat the treatment by `0.0194` bits overall (`0.0101` in the
+tail) — and the control arm's own output exposed three defects in the
+experimental setup that caused it:
+
+1. **The teacher was amnesic at every chunk boundary.** `teacher_targets`
+   called `teacher(input_ids=ids)` without carrying `past_key_values` across
+   chunks of the same document. So on chunk 2 (`is_doc_start=False`), the
+   teacher's target distribution was ignorant of chunk 1 — and a student
+   carrying recurrent state from chunk 1 was *penalised* for remembering what
+   the amnesic teacher forgot. `teacher_targets`, `distill_steps`,
+   `evaluate_gap` and `teacher_reference_bits` now carry a `DynamicCache`
+   across chunks of the same document (`teacher_cache=True`, capped at
+   `max_teacher_tokens=2048` = 288 MiB on `Qwen3-4B`).
+2. **85% of chunks in the stream were 1-chunk documents (`is_doc_start=True`).**
+   At `min_chars=512` (~120 tokens) and `chunk=512`, measured on
+   `OpenCodeInstruct`: 34 of 40 chunks were `is_doc_start=True` (1.18 chunks per
+   document), so `odydora_reset_state()` wiped the recurrent state at 85% of
+   steps. `stream_text_chunks` now accepts `min_chunks=2`, dropping documents
+   that fit inside a single chunk so every streamed document crosses at least
+   one chunk boundary.
+3. **`tail_kl_bits` sliced the last 25% of the validation list (`VAL[-15:]`)
+   rather than continuation chunks (`is_doc_start=False`)** — which is why the
+   `N=0` control arm also printed `"tail beat overall: YES - consistent with
+   carried state doing the work"`. `evaluate_gap` now splits chunks into
+   `fresh_kl_bits` (`is_doc_start=True`, chunk 1) and `carried_kl_bits`
+   (`is_doc_start=False`, chunk 2+), and the notebook guards the `N=0` control
+   arm in both Cell 3 (`adapter-only control arm` instead of `1146880.00x the
+   core`) and Cell 6.
+
+67 tests pass.
+
 ## 0.2.1 — 2026-11-06
 
 **Every corpus in the default mixture is now ungated and malware-clean.**

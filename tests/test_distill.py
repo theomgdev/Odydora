@@ -400,3 +400,80 @@ def test_teacher_reference_bits_gives_the_floor_the_gap_is_read_against():
     assert reference["chunks"] == 4
     assert reference["teacher_bits"] > 0.0
     assert torch.isfinite(torch.tensor(reference["tail_teacher_bits"]))
+
+
+def test_teacher_kv_cache_carries_across_chunks_of_one_document():
+    """Without a teacher KV cache across chunks, the teacher is reset at every
+    chunk boundary just like a static adapter -- its target distribution on
+    chunk 2 is then ignorant of chunk 1, and a student carrying state from
+    chunk 1 is penalised for remembering what the amnesic teacher forgot.
+    """
+    from transformers import DynamicCache
+
+    torch.manual_seed(11)
+    teacher = tiny_lm(hidden=64, layers=2)
+    teacher.requires_grad_(False)
+    teacher.eval()
+
+    c1 = torch.randint(0, 128, (1, 8))
+    c2 = torch.randint(0, 128, (1, 8))
+
+    full_vals, full_idx = teacher_targets(
+        teacher, torch.cat([c1, c2], dim=1), top_k=16
+    )
+    amnesic_vals, _ = teacher_targets(teacher, c2, top_k=16)
+
+    cache = DynamicCache()
+    _ = teacher_targets(teacher, c1, top_k=16, past_key_values=cache)
+    cached_vals, cached_idx = teacher_targets(
+        teacher, c2, top_k=16, past_key_values=cache
+    )
+
+    assert torch.allclose(cached_vals, full_vals[:, 8:], atol=1e-5)
+    assert torch.equal(cached_idx, full_idx[:, 8:])
+    assert not torch.allclose(amnesic_vals, full_vals[:, 8:], atol=1e-3), (
+        "an uncached teacher on chunk 2 must differ from the full-context pass"
+    )
+
+
+def test_min_chunks_drops_single_chunk_documents(monkeypatch):
+    """At `min_chunks=2`, a document that fits inside one chunk is skipped so
+    every streamed document crosses at least one chunk boundary (`is_doc_start=False`).
+    """
+    class LenTok:
+        def __call__(self, text, add_special_tokens=False):
+            return {"input_ids": list(range(len(text) // 10))}
+
+    rows = [
+        {"text": "a" * 100},  # 10 tokens -> 1 chunk of 16 -> dropped at min_chunks=2
+        {"text": "b" * 400},  # 40 tokens -> 3 chunks of 16 -> kept
+    ]
+
+    import odydora.distill as mod
+
+    fake_datasets = types.ModuleType("datasets")
+    fake_datasets.load_dataset = lambda *a, **kw: list(rows)
+    monkeypatch.setitem(sys.modules, "datasets", fake_datasets)
+
+    spec = (("open/repo", None, "train", "text", 1),)
+    chunks = list(
+        mod.stream_text_chunks(
+            LenTok(), 16, datasets_spec=spec, min_chars=50, min_chunks=2
+        )
+    )
+    assert len(chunks) == 3
+    assert [c[2] for c in chunks] == [True, False, False]
+
+
+def test_evaluate_gap_splits_fresh_from_carried_chunks():
+    torch.manual_seed(12)
+    student = attach_core(tiny_lm(), n=16, layers=(0, 1), stride=4)
+    teacher = tiny_lm(hidden=64, layers=3)
+    teacher.requires_grad_(False)
+
+    # 6 chunks: 2 document starts (0, 3) and 4 carried continuations (1, 2, 4, 5)
+    gap = evaluate_gap(student, teacher, text_batches(count=6), top_k=16)
+    assert gap["fresh_chunks"] == 2
+    assert gap["carried_chunks"] == 4
+    assert torch.isfinite(torch.tensor(gap["fresh_kl_bits"]))
+    assert torch.isfinite(torch.tensor(gap["carried_kl_bits"]))

@@ -111,7 +111,7 @@ def check_vocab_match(teacher_tokenizer, student_tokenizer, probe=None):
 
 
 @torch.no_grad()
-def teacher_targets(teacher, ids, top_k=128, attention_mask=None):
+def teacher_targets(teacher, ids, top_k=128, attention_mask=None, past_key_values=None):
     """Compress the teacher's next-token distribution to (values, indices).
 
     Returns `log_probs` and `indices` of shape `(batch, time, top_k)`, in
@@ -121,13 +121,23 @@ def teacher_targets(teacher, ids, top_k=128, attention_mask=None):
     lumped remainder as well, so the objective reaches zero exactly when the
     two distributions agree.
 
-    This is the only thing the teacher contributes, it is `(batch, time, k)`
-    rather than `(batch, time, V)` -- 128 against 151,936 -- and it is
-    detached, so a runtime that cannot hold both models can produce these,
-    free the teacher and then train.
+    When `past_key_values` (a `DynamicCache`) is supplied, the teacher's forward
+    runs with `use_cache=True` and updates the cache in-place across chunks of
+    the same document. Without that, the teacher is reset at every chunk
+    boundary just like a static adapter -- its target distribution on chunk 2
+    is then ignorant of chunk 1, and a student carrying state from chunk 1 is
+    penalised for remembering what the amnesic teacher forgot.
     """
     teacher.eval()
-    out = teacher(input_ids=ids, attention_mask=attention_mask)
+    if past_key_values is not None:
+        out = teacher(
+            input_ids=ids,
+            attention_mask=attention_mask,
+            past_key_values=past_key_values,
+            use_cache=True,
+        )
+    else:
+        out = teacher(input_ids=ids, attention_mask=attention_mask)
     log_probs = torch.log_softmax(out.logits.float(), dim=-1)
     values, indices = log_probs.topk(top_k, dim=-1)
     return values.detach(), indices.detach()
@@ -245,6 +255,7 @@ def stream_text_chunks(
     max_chunks=None,
     skip_chunks=0,
     min_chars=512,
+    min_chunks=1,
     log_every=0,
 ):
     """Yield `(ids, labels, is_doc_start)` windows from a mixture of text corpora.
@@ -312,6 +323,12 @@ def stream_text_chunks(
                 if len(text) < min_chars:
                     continue
                 ids = tokenizer(text, add_special_tokens=False)["input_ids"]
+                if min_chunks > 1 and len(ids) < (min_chunks - 1) * chunk + 2:
+                    # A document that fits in a single chunk never crosses a
+                    # chunk boundary: the state is reset at its start and reset
+                    # again at the next document, so the cross-chunk recurrence
+                    # is never exercised.
+                    continue
                 for begin in range(0, len(ids), chunk):
                     window = ids[begin : begin + chunk]
                     # A window of one token has no predictable position after
@@ -345,6 +362,17 @@ def _row_text(row, field):
     return "\n\n".join(part for part in parts if part)
 
 
+def _advance_teacher_cache(cache, is_doc_start, chunk_len, max_teacher_tokens):
+    """Return a `DynamicCache` for this chunk, resetting on a document start or cap."""
+    from transformers import DynamicCache
+
+    if is_doc_start or cache is None:
+        return DynamicCache()
+    if max_teacher_tokens and cache.get_seq_length() + chunk_len > max_teacher_tokens:
+        return DynamicCache()
+    return cache
+
+
 def distill_steps(
     student,
     teacher,
@@ -358,6 +386,8 @@ def distill_steps(
     grad_accum=1,
     clip=1.0,
     on_step=None,
+    teacher_cache=True,
+    max_teacher_tokens=2048,
 ):
     """Yield one log row every `log_every` chunks while distilling.
 
@@ -367,16 +397,19 @@ def distill_steps(
     minutes is indistinguishable from a hung one.
 
     The teacher is queried under `no_grad` on the same chunk the student sees,
-    so the two are always scored on identical token streams -- which matters
-    more than it looks, because the student's recurrent state depends on the
-    chunk order and a mismatched stream would silently decorrelate the two.
-    The state is reset at a document boundary and carried detached otherwise,
-    exactly as in the agentic path.
+    carrying its KV cache across chunks of the same document when
+    `teacher_cache=True` (capped at `max_teacher_tokens` so T4 VRAM stays
+    bounded). Without a teacher KV cache across chunks, the teacher is reset at
+    every chunk boundary just like a static adapter, so its target distribution
+    on chunk 2 carries zero information from chunk 1 and the student's carried
+    state has nothing cross-chunk to recover. The student's recurrent state is
+    reset at a document boundary and carried detached otherwise.
     """
     student.train()
     started = began = time.time()
     tokens, docs = 0, 0
     kl_window, hard_window, conf_window, kept_window = [], [], [], []
+    t_cache = None
 
     for step, (ids, labels, is_doc_start) in enumerate(batches):
         device = next(student.parameters()).device
@@ -385,10 +418,16 @@ def distill_steps(
         if is_doc_start:
             student.odydora_reset_state()
             docs += 1
+        if teacher_cache:
+            t_cache = _advance_teacher_cache(
+                t_cache, is_doc_start, ids.shape[1], max_teacher_tokens
+            )
         if on_step is not None:
             on_step(step, is_doc_start)
 
-        t_log_probs, t_indices = teacher_targets(teacher, ids, top_k=top_k)
+        t_log_probs, t_indices = teacher_targets(
+            teacher, ids, top_k=top_k, past_key_values=t_cache
+        )
 
         out = student(input_ids=ids)
         student.odydora_detach_state()
@@ -452,6 +491,8 @@ def evaluate_gap(
     tail_fraction=0.25,
     log_every=0,
     desc="gap",
+    teacher_cache=True,
+    max_teacher_tokens=2048,
 ):
     """How far the student's distribution sits from the teacher's, in bits.
 
@@ -460,12 +501,16 @@ def evaluate_gap(
     sharpening toward the corpus while drifting *away* from the teacher, and
     perplexity cannot tell the two apart. The KL to the teacher can.
 
-    Three figures come back. `kl_bits` is the mean gap. `tail_kl_bits` is the
-    gap over the trailing chunks, where the recurrent state has history behind
-    it -- a mechanism that works must show a larger improvement there than
-    overall, and one that only improves the mean is doing something else.
-    `student_bits` is the student's own hard cross-entropy, kept so the gap can
-    be read against an absolute scale.
+    In addition to `kl_bits` (overall) and `tail_kl_bits` (the trailing
+    `tail_fraction` of `batches`), this splits chunks by whether state was
+    actually carried into them: `fresh_kl_bits` covers document-start chunks
+    (`is_doc_start=True`, where state was just reset to zero), and
+    `carried_kl_bits` covers continuation chunks (`is_doc_start=False`, where
+    the teacher has prior chunks in its KV cache and the student must rely on
+    its carried recurrent state). Slicing `batches[-tail:]` on a stream of
+    1-chunk documents scores the last 25% of independent documents rather than
+    cross-chunk carry, which is how an adapter-only control arm (`N=0`) can
+    falsely appear to "win in the tail".
 
     `batches` must be a materialised list, since it is iterated once here and
     again by every arm being compared; a generator would silently hand the
@@ -474,21 +519,30 @@ def evaluate_gap(
     student.eval()
     rows = []
     total = len(batches) if hasattr(batches, "__len__") else None
+    t_cache = None
 
     for step, (ids, labels, is_doc_start) in enumerate(batches):
         device = next(student.parameters()).device
         ids, labels = ids.to(device), labels.to(device)
         if is_doc_start:
             student.odydora_reset_state()
+        if teacher_cache:
+            t_cache = _advance_teacher_cache(
+                t_cache, is_doc_start, ids.shape[1], max_teacher_tokens
+            )
 
-        t_log_probs, t_indices = teacher_targets(teacher, ids, top_k=top_k)
+        t_log_probs, t_indices = teacher_targets(
+            teacher, ids, top_k=top_k, past_key_values=t_cache
+        )
         out = student(input_ids=ids)
         _, parts = distill_loss(
             out.logits, t_log_probs, t_indices, labels=labels,
             hard_weight=1.0, return_parts=True,
         )
         if parts["kept"]:
-            rows.append((parts["kl_bits"], parts["hard_bits"], parts["kept"]))
+            rows.append(
+                (parts["kl_bits"], parts["hard_bits"], parts["kept"], bool(is_doc_start))
+            )
 
         if log_every and (step + 1) % log_every == 0:
             target = f"/{total}" if total else ""
@@ -500,18 +554,31 @@ def evaluate_gap(
         return mass / seen if seen else float("nan")
 
     cut = int(len(rows) * (1 - tail_fraction))
+    fresh = [r for r in rows if r[3]]
+    carried = [r for r in rows if not r[3]]
     return {
         "kl_bits": weighted(rows, 0),
         "tail_kl_bits": weighted(rows[cut:], 0),
+        "fresh_kl_bits": weighted(fresh, 0),
+        "carried_kl_bits": weighted(carried, 0),
         "student_bits": weighted(rows, 1),
         "tail_student_bits": weighted(rows[cut:], 1),
         "chunks": len(rows),
         "tail_chunks": len(rows[cut:]),
+        "fresh_chunks": len(fresh),
+        "carried_chunks": len(carried),
     }
 
 
 @torch.no_grad()
-def teacher_reference_bits(teacher, batches, tail_fraction=0.25, log_every=0):
+def teacher_reference_bits(
+    teacher,
+    batches,
+    tail_fraction=0.25,
+    log_every=0,
+    teacher_cache=True,
+    max_teacher_tokens=2048,
+):
     """The teacher's own cross-entropy on the same chunks, in bits per token.
 
     The floor of the experiment. A student whose `student_bits` approaches this
@@ -521,10 +588,17 @@ def teacher_reference_bits(teacher, batches, tail_fraction=0.25, log_every=0):
     """
     teacher.eval()
     rows = []
-    for step, (ids, labels, _) in enumerate(batches):
+    t_cache = None
+    for step, (ids, labels, is_doc_start) in enumerate(batches):
         device = next(teacher.parameters()).device
         ids, labels = ids.to(device), labels.to(device)
-        out = teacher(input_ids=ids)
+        if teacher_cache:
+            t_cache = _advance_teacher_cache(
+                t_cache, is_doc_start, ids.shape[1], max_teacher_tokens
+            )
+            out = teacher(input_ids=ids, past_key_values=t_cache, use_cache=True)
+        else:
+            out = teacher(input_ids=ids)
         logits = out.logits.float()[:, :-1].reshape(-1, out.logits.shape[-1])
         targets = labels[:, 1:].reshape(-1)
         loss = F.cross_entropy(logits, targets, ignore_index=-100)

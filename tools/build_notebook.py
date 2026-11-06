@@ -285,13 +285,16 @@ model, tok = build(STUDENT, n=N, layers=LAYERS, stride=STRIDE, mix=MIX, window=W
 _INIT_STATE = {k: v.detach().cpu().clone() for k, v in trainable_state(model).items()}
 
 rows = report(model)
-ratio = rows["adapter"] / max(rows["core"], 1)
 print(f"total       {rows['total']:>14,}")
 print(f"trainable   {rows['trainable']:>14,}   ({rows['trainable_fraction']:.4%})")
 print(f"  adapter   {rows['adapter']:>14,}")
 print(f"  core      {rows['core']:>14,}   shared by {len(model.odydora_layers)} layer(s)")
-print(f"  ratio     adapter is {ratio:.2f}x the core"
-      + ("" if ratio <= 2.5 else "   <- too high to attribute a win to the core; lower RANK"))
+if rows["core"] > 0:
+    ratio = rows["adapter"] / rows["core"]
+    print(f"  ratio     adapter is {ratio:.2f}x the core"
+          + ("" if ratio <= 2.5 else "   <- too high to attribute a win to the core; lower RANK"))
+else:
+    print("  ratio     adapter-only control arm (no core)")
 print(f"core: {model.odydora_core}")
 
 teacher = None
@@ -337,7 +340,7 @@ if MODE == "distill":
 
     def chunks(skip=0, limit=None):
         return stream_text_chunks(tok, CFG["chunk"], max_chunks=limit,
-                                  skip_chunks=skip, log_every=100)
+                                  skip_chunks=skip, min_chunks=2, log_every=100)
 
     # Held out by position in the stream, after every training chunk. The
     # mixture is interleaved, so a tail slice still spans all four domains.
@@ -348,7 +351,9 @@ if MODE == "distill":
         if len(VAL) % 20 == 0:
             print(f"  {len(VAL)}/{CFG['val_chunks']} val chunks", flush=True)
     val_tokens = sum(int(c[0].numel()) for c in VAL)
-    print(f"val: {len(VAL)} chunks, {val_tokens:,} tokens, every position supervised")
+    val_carried = sum(1 for _, _, is_start in VAL if not is_start)
+    print(f"val: {len(VAL)} chunks ({val_carried} carried across a chunk boundary), "
+          f"{val_tokens:,} tokens, every position supervised")
 else:
     import datasets, statistics
     print("probing 10 traces for the length histogram", flush=True)
@@ -444,7 +449,8 @@ if MODE == "distill":
 
     print("\\nstep-0 gap, before any training", flush=True)
     BASE = evaluate_gap(model, teacher, VAL, top_k=TOP_K, log_every=20, desc="baseline gap")
-    print(f"gap        {BASE['kl_bits']:.4f} bits (tail {BASE['tail_kl_bits']:.4f})  <- the number to beat")
+    print(f"gap        {BASE['kl_bits']:.4f} bits "
+          f"(carried {BASE['carried_kl_bits']:.4f}, fresh {BASE['fresh_kl_bits']:.4f})  <- the number to beat")
     print(f"student    {BASE['student_bits']:.4f} bits/token vs teacher's {FLOOR['teacher_bits']:.4f}")
 
     stream = chunks(skip=start["traces"], limit=CFG["train_chunks"])
@@ -518,6 +524,8 @@ code("""
 if MODE == "distill":
     FINAL = evaluate_gap(model, teacher, VAL, top_k=TOP_K, log_every=20, desc="final gap")
     d_kl = BASE["kl_bits"] - FINAL["kl_bits"]
+    d_carried = BASE["carried_kl_bits"] - FINAL["carried_kl_bits"]
+    d_fresh = BASE["fresh_kl_bits"] - FINAL["fresh_kl_bits"]
     d_tail = BASE["tail_kl_bits"] - FINAL["tail_kl_bits"]
     d_hard = BASE["student_bits"] - FINAL["student_bits"]
 
@@ -525,28 +533,32 @@ if MODE == "distill":
     print("{:<22} {:>9.4f} {:>9.4f} {:>+10.4f}".format(
         "gap to teacher", BASE["kl_bits"], FINAL["kl_bits"], d_kl))
     print("{:<22} {:>9.4f} {:>9.4f} {:>+10.4f}".format(
+        "  carried (chunk 2+)", BASE["carried_kl_bits"], FINAL["carried_kl_bits"], d_carried))
+    print("{:<22} {:>9.4f} {:>9.4f} {:>+10.4f}".format(
+        "  fresh (chunk 1)", BASE["fresh_kl_bits"], FINAL["fresh_kl_bits"], d_fresh))
+    print("{:<22} {:>9.4f} {:>9.4f} {:>+10.4f}".format(
         "  tail 25%", BASE["tail_kl_bits"], FINAL["tail_kl_bits"], d_tail))
     print("{:<22} {:>9.4f} {:>9.4f} {:>+10.4f}".format(
         "student bits/token", BASE["student_bits"], FINAL["student_bits"], d_hard))
     print("{:<22} {:>9.4f}".format("teacher bits/token", FLOOR["teacher_bits"]))
 
     recovered = d_kl / BASE["kl_bits"] if BASE["kl_bits"] > 0 else float("nan")
-    tail_recovered = d_tail / BASE["tail_kl_bits"] if BASE["tail_kl_bits"] > 0 else float("nan")
+    carried_rec = d_carried / BASE["carried_kl_bits"] if BASE["carried_kl_bits"] > 0 else float("nan")
     print(f"\\nrecovered {recovered:.1%} of the distribution gap "
-          f"({tail_recovered:.1%} in the tail) on {report(model)['trainable']:,} trainable parameters")
-    print("tail beat overall: "
-          + ("YES - consistent with carried state doing the work"
-             if tail_recovered > recovered
-             else "NO - the gain is not coming from state carry"))
+          f"({carried_rec:.1%} on carried chunks) on {report(model)['trainable']:,} trainable parameters")
 
     core = getattr(model, "odydora_core", None)
     if core is not None:
+        print("carried beat fresh: "
+              + ("YES - consistent with carried state doing the work"
+                 if d_carried > d_fresh
+                 else "NO - the gain is not yet coming from cross-chunk state carry"))
         print(f"\\nmix {core.mix.detach().item():.4f} (init {MIX})   "
               f"|up| {core.up.weight.detach().norm():.4f} (init 0.0)")
         print("mix moved: " + ("YES" if abs(core.mix.detach().item() - MIX) > 1e-4
                                else "NO - the core has not learned a time constant"))
     else:
-        print("\\ncore: None (adapter-only control arm)")
+        print("\\ncore: None (adapter-only control arm; no state carried across chunks)")
     print(f"\\nD-gate: {'PASS' if d_kl > 0 else 'FAIL - the gap did not close'}")
 else:
     from odydora.train import evaluate

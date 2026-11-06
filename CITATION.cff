@@ -9,7 +9,7 @@ authors:
 url: "https://github.com/theomgdev/Odydora"
 repository-code: "https://github.com/theomgdev/Odydora"
 license: MIT
-version: 0.2.1
+version: 0.2.2
 date-released: "2026-11-06"
 keywords:
   - "parameter-efficient fine-tuning"
